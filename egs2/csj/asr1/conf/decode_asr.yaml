@@ -1,6 +1,9 @@
 lm_weight: 0.3
+lm_add_weight: 0.3
+lm_add_2_weight: 0.3
 beam_size: 20
 penalty: 0.0
 maxlenratio: 0.0
 minlenratio: 0.0
 ctc_weight: 0.3
+ctc_add_acoustic_weight: 0.3
