@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
+# reference: https://github.com/ffxiong/uaspeech/blob/master/s5/local/prepare_uaspeech_data.sh
+
 set -e
 set -u
 set -o pipefail
@@ -16,8 +18,11 @@ stage=0
 stop_stage=2
 mlf_root=
 audio_root=
+datadir=data
 nj=16
 cleanup=true
+use_single_mic=false  # if true, use only M5 mic for dysarthric speakers
+speaker_groups="ctl,dys"
 
 log "$0 $*"
 . utils/parse_options.sh
@@ -45,8 +50,24 @@ fi
 
 mlfdir="${mlf_root}/mlf"
 audiodir="${audio_root}/audio"
-workdir=data/local/uaspeech_prep
+workdir="${datadir}/local/uaspeech_prep"
 mkdir -p "${workdir}"
+
+speaker_groups=${speaker_groups// /}
+IFS=',' read -r -a selected_groups <<< "${speaker_groups}"
+if [ ${#selected_groups[@]} -eq 0 ]; then
+    log "Error: --speaker_groups must contain at least one group (ctl and/or dys)."
+    exit 1
+fi
+for grp in "${selected_groups[@]}"; do
+    case "${grp}" in
+        ctl|dys) ;;
+        *)
+            log "Error: Unsupported group '${grp}'. Use ctl and/or dys."
+            exit 1
+            ;;
+    esac
+done
 
 prepare_group() {
     local settyp=$1   # ctl or dys
@@ -81,6 +102,12 @@ prepare_group() {
 
         local wavdir="${spkdir}/${x}"
         : > "${tmpdir}/${x}.wav.scp"
+        local -a utt_list_cmd
+        if "${use_single_mic}"; then
+            utt_list_cmd=(awk '$1 ~ /_M5$/ { print $1 }' "${textfil}")
+        else
+            utt_list_cmd=(cut -d ' ' -f1 "${textfil}")
+        fi
         while IFS= read -r utt; do
             wavpath="${wavdir}/${utt}.wav"
             if [ -f "${wavpath}" ]; then
@@ -88,15 +115,16 @@ prepare_group() {
             else
                 log "Warning: missing wav ${wavpath}, skip"
             fi
-        done < <(awk '$1 ~ /_M5$/ { print $1 }' "${textfil}")
-        # done < <(cut -d ' ' -f1 "${textfil}")
+        done < <("${utt_list_cmd[@]}")
         LC_ALL=C sort -o "${tmpdir}/${x}.wav.scp" "${tmpdir}/${x}.wav.scp"
 
-        awk '
-            NR==FNR { keep[$1]=1; next }
-            { utt=$1; if (utt in keep) print $0; }
-        ' "${tmpdir}/${x}.wav.scp" "${textfil}" > "${tmpdir}/${x}.text.filtered"
-        mv -f "${tmpdir}/${x}.text.filtered" "${tmpdir}/${x}.text"
+        if "${use_single_mic}"; then
+            awk '
+                NR==FNR { keep[$1]=1; next }
+                { utt=$1; if (utt in keep) print $0; }
+            ' "${tmpdir}/${x}.wav.scp" "${textfil}" > "${tmpdir}/${x}.text.filtered"
+            mv -f "${tmpdir}/${x}.text.filtered" "${tmpdir}/${x}.text"
+        fi
 
         cut -d " " -f 1 "${tmpdir}/${x}.wav.scp" | sed -e "s|^\(\([^_]\+\)_.*\)|\1 \2|g" > "${tmpdir}/${x}.utt2spk"
     done
@@ -142,69 +170,74 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     ctl_spk="CF02 CF03 CF04 CM04 CM05 CM06 CM08 CM09 CM10 CM12 CM13"
     dys_spk="F02 F03 F04 M01 M04 M05 M07 M08 M09 M10 M11 M12 M14 M16"
 
-    prepare_group ctl "${audiodir}" "${ctl_spk}"
-    prepare_group dys "${audiodir}" "${dys_spk}"
+    for grp in "${selected_groups[@]}"; do
+        case "${grp}" in
+            ctl) spk_list="${ctl_spk}" ;;
+            dys) spk_list="${dys_spk}" ;;
+        esac
+        prepare_group "${grp}" "${audiodir}" "${spk_list}"
+    done
 fi
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     # Build final splits for ESPnet
-    mkdir -p data/train data/dev data/test
+    mkdir -p "${datadir}/train" "${datadir}/dev" "${datadir}/test"
 
     # First, create train_all (B1+B3) and test (B2)
     # Combine ctl and dys groups for B1+B3
-    mkdir -p data/train_all
-    : > data/train_all/wav.scp; : > data/train_all/text; : > data/train_all/utt2spk
-    for grp in ctl dys; do
+    mkdir -p "${datadir}/train_all"
+    : > "${datadir}/train_all/wav.scp"; : > "${datadir}/train_all/text"; : > "${datadir}/train_all/utt2spk"
+    for grp in "${selected_groups[@]}"; do
         for ff in wav.scp text utt2spk; do
             if [ -s "${workdir}/train_${grp}all/${ff}" ]; then
-                grep -E '_B1_|_B3_' "${workdir}/train_${grp}all/${ff}" >> data/train_all/${ff} || true
+                grep -E '_B1_|_B3_' "${workdir}/train_${grp}all/${ff}" >> "${datadir}/train_all/${ff}" || true
             fi
         done
     done
-    [ -s data/train_all/utt2spk ] && awk '{print $1, $2}' data/train_all/utt2spk | utils/utt2spk_to_spk2utt.pl > data/train_all/spk2utt
+    [ -s "${datadir}/train_all/utt2spk" ] && awk '{print $1, $2}' "${datadir}/train_all/utt2spk" | utils/utt2spk_to_spk2utt.pl > "${datadir}/train_all/spk2utt"
 
     # Create test from B2
-    mkdir -p data/test
-    : > data/test/wav.scp; : > data/test/text; : > data/test/utt2spk
-    for grp in ctl dys; do
+    mkdir -p "${datadir}/test"
+    : > "${datadir}/test/wav.scp"; : > "${datadir}/test/text"; : > "${datadir}/test/utt2spk"
+    for grp in "${selected_groups[@]}"; do
         for ff in wav.scp text utt2spk; do
             if [ -s "${workdir}/test_${grp}/${ff}" ]; then
-                cat "${workdir}/test_${grp}/${ff}" >> data/test/${ff}
+                cat "${workdir}/test_${grp}/${ff}" >> "${datadir}/test/${ff}"
             fi
         done
     done
-    [ -s data/test/utt2spk ] && awk '{print $1, $2}' data/test/utt2spk | utils/utt2spk_to_spk2utt.pl > data/test/spk2utt
+    [ -s "${datadir}/test/utt2spk" ] && awk '{print $1, $2}' "${datadir}/test/utt2spk" | utils/utt2spk_to_spk2utt.pl > "${datadir}/test/spk2utt"
 
     # Split train_all into train (90%) and dev (10%)
-    mkdir -p data/train data/dev
+    mkdir -p "${datadir}/train" "${datadir}/dev"
     
     # Get total number of utterances
-    total_utts=$(wc -l < data/train_all/utt2spk)
+    total_utts=$(wc -l < "${datadir}/train_all/utt2spk")
     dev_size=$((($total_utts + 9) / 10))  # 10%
 
     python3 -c "import random; random.seed(42); ids=list(range(1,$total_utts+1)); sample=sorted(random.sample(ids, $dev_size)); print('\n'.join(map(str, sample)))" \
-    > data/local/uaspeech_prep/dev_indices.txt
+    > "${workdir}/dev_indices.txt"
 
     for ff in wav.scp text utt2spk; do
-        : > data/train/$ff
-        : > data/dev/$ff
-        awk -v dev="data/dev/$ff" -v trn="data/train/$ff" '
+        : > "${datadir}/train/${ff}"
+        : > "${datadir}/dev/${ff}"
+        awk -v dev="${datadir}/dev/${ff}" -v trn="${datadir}/train/${ff}" '
             NR==FNR { idx[$1]=1; next }           # 1st file: dev_indices を集合化
             (FNR in idx) { print > dev; next }    # 2nd file: 行番号(FNR)が集合にあれば dev
             { print > trn }                       # それ以外は train
-        ' data/local/uaspeech_prep/dev_indices.txt data/train_all/$ff
+        ' "${workdir}/dev_indices.txt" "${datadir}/train_all/${ff}"
     done
 
     # Generate spk2utt for train and dev
-    [ -s data/train/utt2spk ] && awk '{print $1, $2}' data/train/utt2spk | utils/utt2spk_to_spk2utt.pl > data/train/spk2utt
-    [ -s data/dev/utt2spk ] && awk '{print $1, $2}' data/dev/utt2spk | utils/utt2spk_to_spk2utt.pl > data/dev/spk2utt
+    [ -s "${datadir}/train/utt2spk" ] && awk '{print $1, $2}' "${datadir}/train/utt2spk" | utils/utt2spk_to_spk2utt.pl > "${datadir}/train/spk2utt"
+    [ -s "${datadir}/dev/utt2spk" ] && awk '{print $1, $2}' "${datadir}/dev/utt2spk" | utils/utt2spk_to_spk2utt.pl > "${datadir}/dev/spk2utt"
 
     # Clean up temporary train_all
-    rm -rf data/train_all
+    rm -rf "${datadir}/train_all"
 
     # Validate final splits
     for split in train dev test; do
-        [ -s "data/${split}/wav.scp" ] && utils/validate_data_dir.sh --no-feats "data/${split}"
+        [ -s "${datadir}/${split}/wav.scp" ] && utils/validate_data_dir.sh --no-feats "${datadir}/${split}"
     done
 fi
 
