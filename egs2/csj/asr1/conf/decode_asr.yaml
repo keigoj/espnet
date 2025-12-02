@@ -1,6 +1,11 @@
-lm_weight: 0.3
+lm_weight: 0.0
+lm_weight_sub: 0.0
+lm_weight_sub2: 0.0
+lm_weight_sub3: 0.0
 beam_size: 20
 penalty: 0.0
 maxlenratio: 0.0
 minlenratio: 0.0
 ctc_weight: 0.3
+ctc_weight_2: 0.3
+ctc_weight_3: 0.3

@@ -34,7 +34,15 @@ open(WAV,">", "$out_dir/wav.scp") or die "Could not open the output file $out_di
 my $header = <CSV>;
 while(<CSV>) {
   chomp;
-  ($spkr, $filepath, $text, $upvotes, $downvotes, $age, $gender, $accent) = split("\t", $_);
+  my @fields = split("\t", $_);
+  $spkr      = $fields[0];
+  $filepath  = $fields[1];
+  $text      = $fields[3];
+  $upvotes   = $fields[5];
+  $downvotes = $fields[6];
+  $age       = $fields[7];
+  $gender    = $fields[8];
+  $accent    = $fields[9];
   if ("$gender" eq "female") {
     $gender = "f";
   } else {

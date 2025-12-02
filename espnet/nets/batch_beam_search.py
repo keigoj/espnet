@@ -127,7 +127,7 @@ class BatchBeamSearch(BeamSearch):
         new_token_ids = top_ids % self.n_vocab
         return prev_hyp_ids, new_token_ids, prev_hyp_ids, new_token_ids
 
-    def init_hyp(self, x: torch.Tensor) -> BatchHypothesis:
+    def init_hyp(self, x: torch.Tensor, x2: torch.Tensor=None, x3: torch.Tensor=None) -> BatchHypothesis:
         """Get an initial hypothesis data.
 
         Args:
@@ -140,7 +140,12 @@ class BatchBeamSearch(BeamSearch):
         init_states = dict()
         init_scores = dict()
         for k, d in self.scorers.items():
-            init_states[k] = d.batch_init_state(x)
+            if k == "decoder_2" or k == "ctc_2":
+                init_states[k] = d.batch_init_state(x2)
+            elif k == "decoder_3" or k == "ctc_3":
+                init_states[k] = d.batch_init_state(x3)
+            else:
+                init_states[k] = d.batch_init_state(x)
             init_scores[k] = 0.0
 
         # NOTE (Shih-Lun): added for OpenAI Whisper ASR
@@ -162,6 +167,8 @@ class BatchBeamSearch(BeamSearch):
         self,
         hyp: BatchHypothesis,
         x: torch.Tensor,
+        x2: torch.Tensor = None,
+        x3: torch.Tensor = None,
         pre_x: torch.Tensor = None,
     ) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Score new hypothesis by `self.full_scorers`.
@@ -184,14 +191,19 @@ class BatchBeamSearch(BeamSearch):
         scores = dict()
         states = dict()
         for k, d in self.full_scorers.items():
-            if "decoder" in k and self.return_hs:
-                (scores[k], hs), states[k] = d.batch_score(
-                    hyp.yseq, hyp.states[k], x, return_hs=self.return_hs
-                )
-            elif "decoder" in k and pre_x is not None:
-                scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x, pre_x)
+            if k == "decoder_2" or k == "ctc_2":
+                scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x2)
+            elif k == "decoder_3" or k == "ctc_3":
+                scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x3)
             else:
-                scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x)
+                if "decoder" in k and self.return_hs:
+                    (scores[k], hs), states[k] = d.batch_score(
+                        hyp.yseq, hyp.states[k], x, return_hs=self.return_hs
+                    )
+                elif "decoder" in k and pre_x is not None:
+                    scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x, pre_x)
+                else:
+                    scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x)
 
         if self.return_hs:
             return hs, scores, states
@@ -202,6 +214,8 @@ class BatchBeamSearch(BeamSearch):
         hyp: BatchHypothesis,
         ids: torch.Tensor,
         x: torch.Tensor,
+        x2: torch.Tensor = None,
+        x3: torch.Tensor = None,
         pre_x: torch.Tensor = None,
     ) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Score new hypothesis by `self.full_scorers`.
@@ -230,9 +244,18 @@ class BatchBeamSearch(BeamSearch):
                     hyp.yseq, ids, hyp.states[k], pre_x
                 )
             else:
-                scores[k], states[k] = d.batch_score_partial(
+                if k == "decoder_2" or k == "ctc_2":
+                    scores[k], states[k] = d.batch_score_partial(
+                        hyp.yseq, ids, hyp.states[k], x2
+                    )
+                elif k == "decoder_3" or k == "ctc_3":
+                    scores[k], states[k] = d.batch_score_partial(
+                        hyp.yseq, ids, hyp.states[k], x3
+                    )
+                else:
+                    scores[k], states[k] = d.batch_score_partial(
                     hyp.yseq, ids, hyp.states[k], x
-                )
+                    )
         return scores, states
 
     def merge_states(self, states: Any, part_states: Any, part_idx: int) -> Any:
@@ -260,6 +283,8 @@ class BatchBeamSearch(BeamSearch):
         self,
         running_hyps: BatchHypothesis,
         x: torch.Tensor,
+        x2: torch.Tensor = None,
+        x3: torch.Tensor = None,
         pre_x: torch.Tensor = None,
     ) -> BatchHypothesis:
         """Search new tokens for running hypotheses and encoded speech x.
@@ -273,6 +298,11 @@ class BatchBeamSearch(BeamSearch):
             BatchHypothesis: Best sorted hypotheses
 
         """
+
+        enc_list   = [x, x2, x3]          # 各 ASR のエンコーダ出力
+        suffixes   = ["", "_2", "_3"]     # 対応するキーの接尾辞
+        active_enc = [(enc, suf) for enc, suf in zip(enc_list, suffixes) if enc is not None]
+
         n_batch = len(running_hyps)
         part_ids = None  # no pre-beam
         # batch scoring
@@ -283,6 +313,8 @@ class BatchBeamSearch(BeamSearch):
             hs, scores, states = self.score_full(
                 running_hyps,
                 x.expand(n_batch, *x.shape),
+                x2=x2.expand(n_batch, *x2.shape) if x2 is not None else None,
+                x3=x3.expand(n_batch, *x3.shape) if x3 is not None else None,
                 pre_x=(
                     pre_x.expand(n_batch, *pre_x.shape) if pre_x is not None else None
                 ),
@@ -291,13 +323,23 @@ class BatchBeamSearch(BeamSearch):
             scores, states = self.score_full(
                 running_hyps,
                 x.expand(n_batch, *x.shape),
+                x2=x2.expand(n_batch, *x2.shape) if x2 is not None else None,
+                x3=x3.expand(n_batch, *x3.shape) if x3 is not None else None,
                 pre_x=(
                     pre_x.expand(n_batch, *pre_x.shape) if pre_x is not None else None
                 ),
             )
 
-        for k in self.full_scorers:
-            weighted_scores += self.weights[k] * scores[k]
+        # for k in self.full_scorers:
+        #     weighted_scores += self.weights[k] * scores[k]
+        if "lm" in scores and self.weights.get("lm", 0.0) != 0.0:
+            weighted_scores += self.weights["lm"] * scores["lm"]
+        
+        for _, suf in active_enc:
+            weighted_scores += self.weights[f"decoder{suf}"] * scores[f"decoder{suf}"]
+            if f"lm_sub{suf}" in scores:
+                weighted_scores -= self.weights[f"lm_sub{suf}"] * scores[f"lm_sub{suf}"]
+
         # partial scoring
         if self.do_pre_beam:
             pre_beam_scores = (
@@ -309,9 +351,15 @@ class BatchBeamSearch(BeamSearch):
         # NOTE(takaaki-hori): Unlike BeamSearch, we assume that score_partial returns
         # full-size score matrices, which has non-zero scores for part_ids and zeros
         # for others.
-        part_scores, part_states = self.score_partial(running_hyps, part_ids, x, pre_x)
-        for k in self.part_scorers:
-            weighted_scores += self.weights[k] * part_scores[k]
+        
+        # part_scores, part_states = self.score_partial(running_hyps, part_ids, x, pre_x)
+        part_scores, part_states = self.score_partial(running_hyps, part_ids, x, x2, x3, pre_x)
+        
+        # for k in self.part_scorers:
+        #     weighted_scores += self.weights[k] * part_scores[k]
+        for _, suf in active_enc:
+            weighted_scores += self.weights[f"ctc{suf}"] * part_scores[f"ctc{suf}"]
+
         # add previous hyp scores
         weighted_scores += running_hyps.score.to(
             dtype=x.dtype, device=x.device

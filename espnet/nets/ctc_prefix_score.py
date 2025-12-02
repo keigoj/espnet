@@ -44,6 +44,12 @@ class CTCPrefixScoreTH(object):
             else torch.device("cpu")
         )
         # Pad the rest of posteriors in the batch
+        
+        if x.dtype.is_floating_point:
+            limit = torch.finfo(x.dtype).min
+        else:
+            limit = -1.0e10
+        self.logzero = float(limit)
         # TODO(takaaki-hori): need a better way without for-loops
         for i, l in enumerate(xlens):
             if l < self.input_length:

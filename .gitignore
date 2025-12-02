@@ -122,3 +122,5 @@ tools/condarc
 tools/lightning_constraints.txt
 tools/versa
 tools/ParallelWaveGAN
+
+egs2/csj/asr1/results/*

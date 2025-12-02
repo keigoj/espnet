@@ -126,6 +126,22 @@ class Speech2Text:
         threshold_probability: float = 0.99,
         max_seq_len: int = 5,
         max_mask_parallel: int = -1,
+        # Multiple ASR models
+        asr_train_config_2: Union[Path, str, None] = None,
+        asr_train_config_3: Union[Path, str, None] = None,
+        asr_model_file_2: Union[Path, str, None] = None,
+        asr_model_file_3: Union[Path, str, None] = None,
+        lm_train_config_sub: Union[Path, str, None] = None,
+        lm_train_config_sub2: Union[Path, str, None] = None,
+        lm_train_config_sub3: Union[Path, str, None] = None,
+        lm_file_sub: Union[Path, str, None] = None,
+        lm_file_sub2: Union[Path, str, None] = None,
+        lm_file_sub3: Union[Path, str, None] = None,
+        ctc_weight_2: float = None,
+        ctc_weight_3: float = None,
+        lm_weight_sub: float = None,
+        lm_weight_sub2: float = None,
+        lm_weight_sub3: float = None,
     ):
 
         task = ASRTask if not enh_s2t_task else EnhS2TTask
@@ -179,6 +195,49 @@ class Speech2Text:
             length_bonus=LengthBonus(len(token_list)),
         )
 
+        # Add multiple ASR models
+        if asr_train_config_2 is not None:
+            asr_model_2, asr_train_asrgs_2 = ASRTask.build_model_from_file(
+                asr_train_config_2, asr_model_file_2, device
+            )
+            asr_model_2.to(dtype=getattr(torch, dtype)).eval()
+
+            decoder_2 = asr_model_2.decoder
+            ctc_2 = CTCPrefixScorer(ctc=asr_model_2.ctc, eos=asr_model_2.eos)
+            token_list_2 = asr_model_2.token_list
+            scorers.update(
+                decoder_2=decoder_2,
+                ctc_2=ctc_2,
+                length_bonus_2=LengthBonus(len(token_list_2)),
+            )
+        else:
+            asr_model_2 = None
+            decoder_2 = None
+            ctc_2 = None
+            token_list_2 = None
+        
+        if asr_train_config_3 is not None:
+            asr_model_3, asr_train_asrgs_3 = ASRTask.build_model_from_file(
+                asr_train_config_3, asr_model_file_3, device
+            )
+            asr_model_3.to(dtype=getattr(torch, dtype)).eval()
+
+            decoder_3 = asr_model_3.decoder
+            ctc_3 = CTCPrefixScorer(
+                ctc=asr_model_3.ctc, eos=asr_model_3.eos
+            )
+            token_list_3 = asr_model_3.token_list
+            scorers.update(
+                decoder_3=decoder_3,
+                ctc_3=ctc_3,
+                length_bonus_3=LengthBonus(len(token_list_3)),
+            )
+        else:
+            asr_model_3 = None
+            decoder_3 = None
+            ctc_3 = None
+            token_list_3 = None
+
         # 2. Build Language model
         if lm_train_config is not None:
             lm, lm_train_args = LMTask.build_model_from_file(
@@ -193,6 +252,50 @@ class Speech2Text:
                 )
 
             scorers["lm"] = lm.lm
+        
+        # Add multiple ASR models
+        if lm_train_config_sub is not None:
+            lm_sub, lm_train_args_sub = LMTask.build_model_from_file(
+                lm_train_config_sub, lm_file_sub, device
+            )
+
+            if quantize_lm:
+                logger.info("Use quantized lm for decoding.")
+
+                lm_sub = torch.quantization.quantize_dynamic(
+                    lm_sub, qconfig_spec=qconfig_spec, dtype=quantize_dtype
+                )
+
+            scorers["lm_sub"] = lm_sub.lm
+        
+        if lm_train_config_sub2 is not None:
+            lm_sub2, lm_train_args_sub2 = LMTask.build_model_from_file(
+                lm_train_config_sub2, lm_file_sub2, device
+            )
+
+            if quantize_lm:
+                logger.info("Use quantized lm for decoding.")
+
+                lm_sub2 = torch.quantization.quantize_dynamic(
+                    lm_sub2, qconfig_spec=qconfig_spec, dtype=quantize_dtype
+                )
+
+            scorers["lm_sub_2"] = lm_sub2.lm
+        
+        if lm_train_config_sub3 is not None:
+            lm_sub3, lm_train_args_sub3 = LMTask.build_model_from_file(
+                lm_train_config_sub3, lm_file_sub3, device
+            )
+
+            if quantize_lm:
+                logger.info("Use quantized lm for decoding.")
+
+                lm_sub3 = torch.quantization.quantize_dynamic(
+                    lm_sub3, qconfig_spec=qconfig_spec, dtype=quantize_dtype
+                )
+
+            scorers["lm_sub_3"] = lm_sub3.lm
+
 
         # 3. Build ngram model
         if ngram_file is not None:
@@ -313,8 +416,15 @@ class Speech2Text:
 
             weights = dict(
                 decoder=1.0 - ctc_weight,
+                decoder_2=1.0 - ctc_weight_2,
+                decoder_3=1.0 - ctc_weight_3,
                 ctc=ctc_weight,
+                ctc_2=ctc_weight_2,
+                ctc_3=ctc_weight_3,
                 lm=lm_weight,
+                lm_sub=lm_weight_sub,
+                lm_sub_2=lm_weight_sub2,
+                lm_sub_3=lm_weight_sub3,
                 ngram=ngram_weight,
                 length_bonus=penalty,
             )
@@ -475,6 +585,8 @@ class Speech2Text:
         logger.info(f"Text tokenizer: {tokenizer}")
 
         self.asr_model = asr_model
+        self.asr_model_2 = asr_model_2
+        self.asr_model_3 = asr_model_3
         self.asr_train_args = asr_train_args
         self.converter = converter
         self.tokenizer = tokenizer
@@ -526,6 +638,8 @@ class Speech2Text:
 
         # b. Forward Encoder
         enc, enc_olens = self.asr_model.encode(**batch)
+        enc2, enc_olens2 = self.asr_model_2.encode(**batch) if self.asr_model_2 else (None, None)
+        enc3, enc_olens_ = self.asr_model_3.encode(**batch) if self.asr_model_3 else (None, None)
         if self.multi_asr:
             enc = enc.unbind(dim=1)  # (batch, num_inf, ...) -> num_inf x [batch, ...]
         if self.enh_s2t_task or self.multi_asr:
@@ -555,8 +669,11 @@ class Speech2Text:
                 enc = enc[0]
             assert len(enc) == 1, len(enc)
 
+            enc2 = enc2[0] if enc2 is not None else None
+            enc3 = enc3[0] if enc3 is not None else None
+
             # c. Passed the encoder result and the beam search
-            results = self._decode_single_sample(enc[0])
+            results = self._decode_single_sample(enc[0], enc2, enc3)
 
             # Encoder intermediate CTC predictions
             if intermediate_outs is not None:
@@ -584,7 +701,13 @@ class Speech2Text:
         return res
 
     @typechecked
-    def _decode_single_sample(self, enc: torch.Tensor) -> ListOfHypothesis:
+    def _decode_single_sample(
+            self,
+            enc: torch.Tensor, 
+            enc_2: Optional[torch.Tensor] = None, 
+            enc_3: Optional[torch.Tensor] = None,
+        ) -> ListOfHypothesis:
+
         if self.beam_search_transducer:
             logging.info("encoder output length: " + str(enc.shape[0]))
             nbest_hyps = self.beam_search_transducer(enc)
@@ -650,7 +773,7 @@ class Speech2Text:
                         if hasattr(module, "setup_step"):
                             module.setup_step()
             nbest_hyps = self.beam_search(
-                x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
+                x=enc, x2=enc_2, x3=enc_3, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
             )
 
         nbest_hyps = nbest_hyps[: self.nbest]
@@ -760,6 +883,22 @@ def inference(
     threshold_probability: float,
     max_seq_len: int,
     max_mask_parallel: int,
+    # Multiple ASR models
+    ctc_weight_2: float,
+    ctc_weight_3: float,
+    lm_weight_sub: float,
+    lm_weight_sub2: float,
+    lm_weight_sub3: float,
+    asr_train_config_2: Optional[str],
+    asr_train_config_3: Optional[str],
+    asr_model_file_2: Optional[str],
+    asr_model_file_3: Optional[str],
+    lm_train_config_sub: Optional[str],
+    lm_train_config_sub2: Optional[str],
+    lm_train_config_sub3: Optional[str],
+    lm_file_sub: Optional[str],
+    lm_file_sub2: Optional[str],
+    lm_file_sub3: Optional[str],
 ):
     if batch_size > 1:
         raise NotImplementedError("batch decoding is not implemented")
@@ -819,6 +958,21 @@ def inference(
         threshold_probability=threshold_probability,
         max_seq_len=max_seq_len,
         max_mask_parallel=max_mask_parallel,
+        asr_train_config_2=asr_train_config_2,
+        asr_train_config_3=asr_train_config_3,
+        asr_model_file_2=asr_model_file_2,
+        asr_model_file_3=asr_model_file_3,
+        lm_train_config_sub=lm_train_config_sub,
+        lm_train_config_sub2=lm_train_config_sub2,
+        lm_train_config_sub3=lm_train_config_sub3,
+        lm_file_sub=lm_file_sub,
+        lm_file_sub2=lm_file_sub2,
+        lm_file_sub3=lm_file_sub3,
+        ctc_weight_2=ctc_weight_2,
+        ctc_weight_3=ctc_weight_3,
+        lm_weight_sub=lm_weight_sub,
+        lm_weight_sub2=lm_weight_sub2,
+        lm_weight_sub3=lm_weight_sub3,
     )
     speech2text = Speech2Text.from_pretrained(
         model_tag=model_tag,
@@ -963,8 +1117,30 @@ def get_parser():
         type=str,
         help="ASR training configuration",
     )
+    # asr_train_config_add* are used for multiple ASR models
+    group.add_argument(
+        "--asr_train_config_2",
+        type=str,
+        help="ASR training configuration",
+    )
+    group.add_argument(
+        "--asr_train_config_3",
+        type=str,
+        help="ASR training configuration",
+    )
     group.add_argument(
         "--asr_model_file",
+        type=str,
+        help="ASR model parameter file",
+    )
+    # asr_model_file_add* are used for multiple ASR models
+    group.add_argument(
+        "--asr_model_file_2",
+        type=str,
+        help="ASR model parameter file",
+    )
+    group.add_argument(
+        "--asr_model_file_3",
         type=str,
         help="ASR model parameter file",
     )
@@ -973,8 +1149,40 @@ def get_parser():
         type=str,
         help="LM training configuration",
     )
+    # lm_train_config_sub* are used for multiple ASR models
+    group.add_argument(
+        "--lm_train_config_sub",
+        type=str,
+        help="LM training configuration",
+    )
+    group.add_argument(
+        "--lm_train_config_sub2",
+        type=str,
+        help="LM training configuration",
+    )
+    group.add_argument(
+        "--lm_train_config_sub3",
+        type=str,
+        help="LM training configuration",
+    )
     group.add_argument(
         "--lm_file",
+        type=str,
+        help="LM parameter file",
+    )
+    # lm_file_sub* are used for multiple ASR models
+    group.add_argument(
+        "--lm_file_sub",
+        type=str,
+        help="LM parameter file",
+    )
+    group.add_argument(
+        "--lm_file_sub2",
+        type=str,
+        help="LM parameter file",
+    )
+    group.add_argument(
+        "--lm_file_sub3",
         type=str,
         help="LM parameter file",
     )
@@ -1076,7 +1284,22 @@ def get_parser():
         default=0.5,
         help="CTC weight in joint decoding",
     )
+    group.add_argument(
+        "--ctc_weight_2",
+        type=float,
+        default=0.5,
+        help="CTC weight in joint decoding",
+    )
+    group.add_argument(
+        "--ctc_weight_3",
+        type=float,
+        default=0.5,
+        help="CTC weight in joint decoding",
+    )
     group.add_argument("--lm_weight", type=float, default=1.0, help="RNNLM weight")
+    group.add_argument("--lm_weight_sub", type=float, default=1.0, help="RNNLM weight")
+    group.add_argument("--lm_weight_sub2", type=float, default=1.0, help="RNNLM weight")
+    group.add_argument("--lm_weight_sub3", type=float, default=1.0, help="RNNLM weight")
     group.add_argument("--ngram_weight", type=float, default=0.9, help="ngram weight")
     group.add_argument("--streaming", type=str2bool, default=False)
     group.add_argument("--hugging_face_decoder", type=str2bool, default=False)

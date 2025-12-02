@@ -12,6 +12,7 @@ stage=0       # start from 0 if you need to start from data preparation
 stop_stage=100
 SECONDS=0
 lang=en # en de fr cy tt kab ca zh-TW it fa eu es ru tr nl eo zh-CN rw pt zh-HK cs pl uk
+commonvoice_lang_dir=
 
  . utils/parse_options.sh || exit 1;
 
@@ -49,12 +50,30 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     local/download_and_untar.sh ${COMMONVOICE} ${data_url} ${lang}.tar.gz
 fi
 
+if [ -z "${commonvoice_lang_dir}" ]; then
+    _default_dir="${COMMONVOICE}/cv-corpus-5.1-2020-06-22/${lang}"
+    if [ -d "${_default_dir}" ]; then
+        commonvoice_lang_dir="${_default_dir}"
+    elif [ -d "${COMMONVOICE}/${lang}" ]; then
+        commonvoice_lang_dir="${COMMONVOICE}/${lang}"
+    else
+        commonvoice_lang_dir=$(find "${COMMONVOICE}" -maxdepth 2 -type d -name "${lang}" | sort | head -n 1)
+    fi
+fi
+
+if [ -z "${commonvoice_lang_dir}" ]; then
+    log "No language directory for ${lang} found under ${COMMONVOICE}. Set --commonvoice_lang_dir explicitly."
+    exit 1
+fi
+
+log "Using ${commonvoice_lang_dir} for language ${lang}"
+
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "stage2: Preparing data for commonvoice"
     ### Task dependent. You have to make data the following preparation part by yourself.
     for part in "validated" "test" "dev"; do
         # use underscore-separated names in data directories.
-        local/data_prep.pl "${COMMONVOICE}/cv-corpus-5.1-2020-06-22/${lang}" ${part} data/"$(echo "${part}_${lang}" | tr - _)"
+        local/data_prep.pl "${commonvoice_lang_dir}" ${part} data/"$(echo "${part}_${lang}" | tr - _)"
     done
 
     # remove test&dev data from validated sentences

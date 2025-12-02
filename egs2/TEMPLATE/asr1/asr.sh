@@ -138,13 +138,25 @@ inference_args=   # Arguments for decoding, e.g., "--lm_weight 0.1".
                   # Note that it will overwrite args in inference config.
 inference_lm=valid.loss.ave.pth       # Language model path for decoding.
 inference_ngram=${ngram_num}gram.bin
-inference_asr_model=valid.acc.ave.pth # ASR model path for decoding.
+inference_asr_model=valid.acc.best.pth # ASR model path for decoding.
                                       # e.g.
                                       # inference_asr_model=train.loss.best.pth
                                       # inference_asr_model=3epoch.pth
                                       # inference_asr_model=valid.acc.best.pth
                                       # inference_asr_model=valid.loss.ave.pth
 download_model= # Download a model from Model Zoo and use it for decoding.
+
+# additional asr and lm for using multiple asr models
+asr_exp_2=
+asr_exp_3=
+inference_asr_model_2=valid.acc.best.pth
+inference_asr_model_3=valid.acc.best.pth
+lm_exp_sub=
+lm_exp_sub_2=
+lm_exp_sub_3=
+inference_lm_sub=valid.loss.ave.pth
+inference_lm_sub_2=valid.loss.ave.pth
+inference_lm_sub_3=valid.loss.ave.pth
 
 # [Task dependent] Set the datadir name created by local/data.sh
 train_set=       # Name of training set.
@@ -1531,10 +1543,33 @@ if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ] && ! [[ " ${skip_stages} " =~
         else
             _opts+="--lm_train_config ${lm_exp}/config.yaml "
             _opts+="--lm_file ${lm_exp}/${inference_lm} "
+
+            # Additional language models
+            if [ -n "${lm_exp_sub}" ]; then
+                _opts+="--lm_train_config_sub ${lm_exp_sub}/config.yaml "
+                _opts+="--lm_file_sub ${lm_exp_sub}/${inference_lm_sub} "
+            fi
+            if [ -n "${lm_exp_sub_2}" ]; then
+                _opts+="--lm_train_config_sub2 ${lm_exp_sub_2}/config.yaml "
+                _opts+="--lm_file_sub2 ${lm_exp_sub_2}/${inference_lm_sub_2} "
+            fi
+            if [ -n "${lm_exp_sub_3}" ]; then
+                _opts+="--lm_train_config_sub3 ${lm_exp_sub_3}/config.yaml "
+                _opts+="--lm_file_sub3 ${lm_exp_sub_3}/${inference_lm_sub_3} "
+            fi
         fi
     fi
     if "${use_ngram}"; then
-         _opts+="--ngram_file ${ngram_exp}/${inference_ngram}"
+        _opts+="--ngram_file ${ngram_exp}/${inference_ngram}"
+    fi
+
+    if [ -n "${asr_exp_2}" ]; then
+        _opts+=" --asr_train_config_2 ${asr_exp_2}/config.yaml "
+        _opts+=" --asr_model_file_2 ${asr_exp_2}/${inference_asr_model_2} "
+    fi
+    if [ -n "${asr_exp_3}" ]; then
+        _opts+=" --asr_train_config_3 ${asr_exp_3}/config.yaml "
+        _opts+=" --asr_model_file_3 ${asr_exp_3}/${inference_asr_model_3} "
     fi
 
     # 2. Generate run.sh
@@ -1749,8 +1784,8 @@ if [ ${stage} -le 13 ] && [ ${stop_stage} -ge 13 ] && ! [[ " ${skip_stages} " =~
     [ -f local/score.sh ] && local/score.sh ${local_score_opts} "${asr_exp}"
 
     # Show results in Markdown syntax
-    scripts/utils/show_asr_result.sh "${asr_exp}" > "${asr_exp}"/RESULTS.md
-    cat "${asr_exp}"/RESULTS.md
+    # scripts/utils/show_asr_result.sh "${asr_exp}" > "${asr_exp}"/RESULTS.md
+    # cat "${asr_exp}"/RESULTS.md
 
 fi
 

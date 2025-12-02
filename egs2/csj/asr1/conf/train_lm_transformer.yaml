@@ -1,0 +1,40 @@
+optim: adam
+optim_conf:
+    lr: 0.005
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 25000
+patience: null
+max_epoch: 100
+lm: transformer
+lm_conf:
+    pos_enc: null
+    embed_unit: 128
+    att_unit: 512
+    head: 8
+    unit: 2048
+    layer: 16
+    dropout_rate: 0.0
+
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 10
+
+num_iters_per_epoch: null
+batch_size: 20
+valid_batch_size: null
+batch_bins: 10000000
+valid_batch_bins: null
+batch_type: numel
+valid_batch_type: null
+fold_length:
+- 150
+sort_in_batch: descending
+sort_batch: descending
+multiple_iterator: false
+chunk_length: 500
+chunk_shift_ratio: 0.5
+num_cache_chunks: 1024
+use_amp: true
