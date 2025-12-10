@@ -96,7 +96,7 @@ ngram_exp=
 ngram_num=3
 
 # Language model related
-use_lm=true       # Use language model for ASR decoding.
+use_lm=false       # Use language model for ASR decoding.
 lm_tag=           # Suffix to the result dir for language model training.
 lm_exp=           # Specify the directory path for LM experiment.
                   # If this option is specified, lm_tag is ignored.
@@ -944,7 +944,7 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ] && ! [[ " ${skip_stages} " =~ [
     fi
     if [ "${feats_type}" = raw ]; then
         # NOTE(Jinchuan): data prep with codec tokenization has been done. Skip this part
-        if [ "${tokenization_choice}" == "codec"]; then
+        if [ "${tokenization_choice}" == "codec" ]; then
             continue
         fi
         log "Stage 6: ${data_extract} -> ${data_feats}"
