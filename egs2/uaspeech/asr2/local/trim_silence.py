@@ -28,12 +28,13 @@ def frame_generator(wav, sr, frame_ms=30):
             frame = np.pad(frame, (0, frame_len - len(frame)))
         yield frame, start, min(end, len(wav))
 
-def vad_trim(wav, sr, frame_ms=20, aggressiveness=3, hangover_frames=1, min_voiced_run=10):
+def vad_trim(wav, sr, frame_ms=20, aggressiveness=2, hangover_frames=1, min_voiced_run=10, tail_min_run=10):
     if frame_ms not in (10, 20, 30):
         raise ValueError("frame_ms must be one of 10, 20, or 30 ms for webrtcvad.")
     frame_len = int(sr * frame_ms / 1000)
     vad = webrtcvad.Vad(aggressiveness)  # 0-3 
     frames = list(frame_generator(wav, sr, frame_ms))
+    
     if len(frames) == 0:
         return wav
     voiced = []
@@ -46,22 +47,30 @@ def vad_trim(wav, sr, frame_ms=20, aggressiveness=3, hangover_frames=1, min_voic
     # search first and last voiced frame to trim leading and trailing silence
     if not any(voiced):  # if all frames are unvoiced, original was is returned
         return wav
-
-    # find first voiced run long enough to treat as real speech
-    run = 0
-    start_voice = None
+    
+    runs = []
+    start = None
     for i, v in enumerate(voiced):
-        run = run + 1 if v else 0
-        if run >= min_voiced_run:
-            start_voice = i - (min_voiced_run - 1)
-            break
-    if start_voice is None:  # voicedが散発的で連続しない場合は全無音扱い
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            runs.append((start, i)) 
+            start = None
+    if start is not None:
+        runs.append((start, len(voiced)))
+
+    runs = [(s, e) for s, e in runs if e - s >= min_voiced_run]
+    if not runs:
+        return wav
+    
+    if len(runs) > 1 and runs[-1][1] - runs[-1][0] < tail_min_run:
+        runs = runs[:-1]
+    if not runs:
         return wav
 
     # add hangover frames to give margin
-    idx_speech = [i for i, v in enumerate(voiced) if v]
-    start_i = max(start_voice - hangover_frames, 0)
-    end_i = min(idx_speech[-1] + hangover_frames, len(frames) - 1)
+    start_i = max(runs[0][0] - hangover_frames, 0)
+    end_i = min(runs[-1][1] - 1 + hangover_frames, len(frames) - 1)
 
     start_sample = int(start_i * frame_len)
     end_sample = min(len(wav), int((end_i + 1) * frame_len))
