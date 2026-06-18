@@ -50,4 +50,5 @@ tgt_case="ts"
     --src_bpe_train_text "dump/raw/${train_set}_sp/text.${src_case}.${src_lang}" \
     --tgt_bpe_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --lm_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
-    --portion 0.1 "$@"
+    --portion 0.1 \
+    --kmeans_opts "" $@"

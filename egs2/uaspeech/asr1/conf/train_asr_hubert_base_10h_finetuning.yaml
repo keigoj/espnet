@@ -1,0 +1,59 @@
+batch_type: numel
+batch_bins: 100000
+accum_grad: 24
+max_epoch: 10
+patience: none
+# The initialization method for model parameters
+init: xavier_uniform
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 10
+
+init_param: [
+    "./ckpt/hubert_base_torchaudio_wav2vec2.pth::encoder.hubert_pretrain_model"
+]
+
+use_amp: true
+input_size: 1
+encoder: torchaudiohubert
+encoder_conf:
+    encoder_embed_dim: 768
+    encoder_num_layers: 12
+    encoder_num_heads: 12
+    encoder_dropout: 0.0
+    encoder_attention_dropout: 0.0
+    encoder_ff_interm_dropout: 0.1
+    encoder_layer_drop: 0.05
+    mask_prob: 0.0
+    mask_channel_prob: 0.0
+    mask_channel_length: 64
+    finetuning: true
+    freeze_encoder_updates: 20000
+
+model_conf:
+    ctc_weight: 1.0
+    lsm_weight: 0.1
+    length_normalized_loss: false
+
+optim: adam
+optim_conf:
+    lr: 0.00005
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 8000
+
+unused_parameters: true
+
+frontend: null
+
+normalize: null
+
+specaug: null
+
+
+normalize: null
+normalize_conf: {}
+specaug: null
+specaug_conf: {}

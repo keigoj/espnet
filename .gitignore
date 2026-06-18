@@ -123,7 +123,7 @@ tools/lightning_constraints.txt
 tools/versa
 tools/ParallelWaveGAN
 
-egs2/uaspeech/asr2/ckpt
 egs*/*/*/exp_tmp
 egs*/*/*/dump_tmp
+egs*/*/*/ckpt
 

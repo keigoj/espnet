@@ -1,0 +1,65 @@
+batch_type: numel
+batch_bins: 100000
+accum_grad: 24
+max_epoch: 15
+patience: none
+# The initialization method for model parameters
+init: xavier_uniform
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 10
+
+init_param: [
+    "./ckpt/hubert_asr_large.pth:model:encoder.hubert_pretrain_model.wav2vec2:model.aux", 
+    # "./ckpt/hubert_asr_large.pth:model.aux:ctc.ctc_lo", 
+]
+    # "./ckpt/hubert_large_ll60k.pth:model:encoder.hubert_pretrain_model.wav2vec2",
+    # "./ckpt/hubert_asr_large_ctc_head.pth:model.aux:ctc", 
+
+use_amp: true
+input_size: 1
+encoder: torchaudiohubert
+encoder_conf:
+    encoder_embed_dim: 1024
+    encoder_num_layers: 24
+    encoder_num_heads: 16
+    encoder_ff_interm_features: 4096
+    encoder_dropout: 0.1
+    encoder_attention_dropout: 0.1
+    encoder_ff_interm_dropout: 0.1
+    encoder_layer_drop: 0.05
+    mask_prob: 0.0
+    mask_channel_prob: 0.0
+    mask_channel_length: 64
+    finetuning: true
+    freeze_encoder_updates: 0
+    extractor_mode: layer_norm
+
+model_conf:
+    ctc_weight: 1.0
+    lsm_weight: 0.1
+    length_normalized_loss: false
+    # sym_blank: "-"
+    # sym_space: "|" 
+
+# preprocessor_conf:
+#     unk_symbol: "|"
+
+optim: adam
+optim_conf:
+    lr: 0.00005
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 1000
+
+unused_parameters: true
+
+frontend: null
+
+normalize: null
+normalize_conf: {}
+
+specaug: null
+specaug_conf: {}
