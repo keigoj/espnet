@@ -60,14 +60,19 @@ max_wav_duration=30  # Maximum duration in second.
 # Kmeans / Codec related
 kmeans_opts=                # The options given to scripts/feats/perform_kmeans.sh
 kmeans_feature="wavlm_large/21" # format: ssl_model_type/layer_idx (e.g. mfcc, hubert_large/21, wavlm_large/21)
+kmeans_feature_conf=        # Override feature_conf passed to scripts/feats/perform_kmeans.sh
 portion=0.1
 nclusters=2000              # The number of clusters for discrete tokenss
 storage_save_mode=true      # Save storage on SSL feature extraction
                             # If true, feature extraction and kmeans clustering on the fly
 gpu_kmeans=true             # Whether to use gpu for kmeans.
+hubert_asr_model_path=../../uaspeech/asr1/ckpt/hubert_asr_large.pth
+hubert_asr_download_dir=ckpt
+hubert_asr_normalize=false
 codec_choice=ESPnet
 codec_checkpoint_path=      # path to codec checkpoint file
 codec_config_path=          # path to codec config file
+kmeans_method=base          # base / phone-based / anchore-based
 
 # Tokenization related
 tokenization_choice=ssl # ssl or codec
@@ -203,10 +208,14 @@ Options:
     # Kmeans related
     --kmeans_opts       # The options given to kmeans step (default="${kmeans_opts}").
     --kmeans_feature    # The string indicates the kmeans features (default="${kmeans_feature}").
+    --kmeans_feature_conf # Override feature_conf passed to scripts/feats/perform_kmeans.sh (default="${kmeans_feature_conf}").
     --portion           # The portion of data used to train kmeans (default="${portion}").
     --nclusters         # The number of clusters for discrete tokens (default="${nclusters}").
     --storage_save_mode # Save storage on SSL feature extraction. If true, feature extraction and kmeans clustering on the fly (default="${storage_save_mode}").
     --gpu_kmeans        # Whether to use gpu for kmeans (default="${gpu_kmeans}").
+    --hubert_asr_model_path # Path to the fairseq HuBERT ASR checkpoint for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_model_path}").
+    --hubert_asr_download_dir # Download/cache directory for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_download_dir}").
+    --hubert_asr_normalize # S3PRL normalize setting for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_normalize}").
 
     # Tokenization related
     --oov                     # Out of vocabulary symbol (default="${oov}").
@@ -467,16 +476,25 @@ else
     lm_token_type="${tgt_token_type}"
 fi
 
-if [ ${kmeans_feature} = "mfcc" ]; then  # MFCC has no layer
+if [ "${kmeans_feature}" = "mfcc" ]; then  # MFCC has no layer
     kmeans_feature_type=$(echo "${kmeans_feature}" | cut -d/ -f1)
     layer=
-    kmeans_feature_conf="{type=mfcc}"
+    if [ -z "${kmeans_feature_conf}" ]; then
+        kmeans_feature_conf="{type=mfcc}"
+    fi
 else
     kmeans_feature_type=$(echo "${kmeans_feature}" | cut -d/ -f1)
     layer=$(echo "${kmeans_feature}" | cut -d/ -f2)
-    # TODO(simpleoier): to support features beyond s3prl
-    s3prl_conf="{upstream=${kmeans_feature_type}}"
-    kmeans_feature_conf="{type=s3prl,conf={s3prl_conf=${s3prl_conf},download_dir=ckpt,multilayer_feature=False,layer=${layer}}}"
+    if [ -z "${kmeans_feature_conf}" ]; then
+        if [ "${kmeans_feature_type}" = "hubert_asr" ]; then
+            s3prl_conf="{upstream=hubert_custom,path_or_url=${hubert_asr_model_path},extra_conf={fairseq=true},normalize=${hubert_asr_normalize}}"
+            kmeans_feature_conf="{type=s3prl,conf={s3prl_conf=${s3prl_conf},download_dir=${hubert_asr_download_dir},layer=${layer},multilayer_feature=False}}"
+        else
+            # TODO(simpleoier): to support features beyond s3prl
+            s3prl_conf="{upstream=${kmeans_feature_type}}"
+            kmeans_feature_conf="{type=s3prl,conf={s3prl_conf=${s3prl_conf},download_dir=ckpt,multilayer_feature=False,layer=${layer}}}"
+        fi
+    fi
 fi
 km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${nclusters}clusters
 
@@ -509,6 +527,9 @@ if [ -z "${asr_tag}" ]; then
     fi
     if [ -n "${speed_perturb_factors}" ]; then
         asr_tag+="_sp"
+    fi
+    if [ -n "${kmeans_method}" ]; then
+        asr_tag+="_km_${kmeans_method}"
     fi
 fi
 if [ -z "${lm_tag}" ]; then
@@ -804,6 +825,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
             --nj ${nj} \
             --cpu_cmd "${train_cmd}" \
             --cuda_cmd "${cuda_cmd}" \
+            --kmeans_method "${kmeans_method}" \
             ${kmeans_opts}
 
         log "Stage 5b: Prepare token_list and convert number indices to CJK tokens"
