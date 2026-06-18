@@ -21,7 +21,7 @@ audio_root=
 datadir=data
 nj=16
 cleanup=true
-use_single_mic=false  # if true, use only M5 mic for dysarthric speakers
+use_single_mic=true  # if true, use only M5 mic for dysarthric speakers
 speaker_groups="ctl,dys"
 
 log "$0 $*"

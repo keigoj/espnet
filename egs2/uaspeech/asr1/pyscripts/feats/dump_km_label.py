@@ -29,6 +29,16 @@ from espnet2.utils.types import str2bool
 from espnet.utils.cli_readers import file_reader_helper
 from espnet.utils.cli_writers import file_writer_helper
 
+# Ensure custom KMeans classes are available for joblib/pickle loading.
+try:
+    from pyscripts.utils.learn_kmeans import AnchoredKMeans, PhoneBasedKMeans  # noqa: F401
+except Exception:
+    class PhoneBasedKMeans:
+        pass
+
+    class AnchoredKMeans(PhoneBasedKMeans):
+        pass
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -45,6 +55,38 @@ feature_reader_choice = dict(
     mert=MERTFeatureReader,
     s3prl=S3PRLFeatureReader,
 )
+
+def _rvq_path(path, idx, rvq_layers):
+    if rvq_layers <= 1:
+        return path
+    for ext in (".mdl", ".npy", ".npz"):
+        if path.endswith(ext):
+            return path[: -len(ext)] + f"_RVQ_{idx}" + ext
+    return f"{path}_RVQ_{idx}"
+
+
+def _load_centers(path):
+    data = np.load(path)
+    if isinstance(data, np.lib.npyio.NpzFile):
+        if "centers" in data:
+            centers = data["centers"]
+        elif len(data.files) == 1:
+            centers = data[data.files[0]]
+        else:
+            raise ValueError(
+                "npz must contain 'centers' or a single array for cluster centers"
+            )
+    else:
+        centers = data
+    if centers.ndim != 2:
+        raise ValueError("cluster centers must be a 2D array")
+    return centers
+
+
+def _centers_path_from_model(path):
+    if path.endswith(".mdl"):
+        return path[: -len(".mdl")] + ".npy"
+    return path + ".npy"
 
 
 def get_parser():
@@ -100,8 +142,21 @@ def get_parser():
 
 class ApplyKmeans(object):
     def __init__(self, km_path, use_gpu):
-        self.km_model = joblib.load(km_path)
-        self.C_np = self.km_model.cluster_centers_.transpose()
+        if km_path.endswith((".npy", ".npz")):
+            centers = _load_centers(km_path)
+        else:
+            try:
+                self.km_model = joblib.load(km_path)
+                centers = self.km_model.cluster_centers_
+            except Exception:
+                centers_path = _centers_path_from_model(km_path)
+                if os.path.exists(centers_path):
+                    logger.warning("joblib load failed; fallback to %s", centers_path)
+                    centers = _load_centers(centers_path)
+                else:
+                    raise
+
+        self.C_np = np.asarray(centers).transpose()
         self.Cnorm_np = (self.C_np**2).sum(0, keepdims=True)
 
         self.C = torch.from_numpy(self.C_np)
@@ -147,7 +202,7 @@ def dump_label(
 
     apply_kmeans = [
         ApplyKmeans(
-            km_path.replace(".mdl", f"_RVQ_{i}.mdl") if RVQ_layers > 1 else km_path,
+            _rvq_path(km_path, i, RVQ_layers),
             use_gpu=use_gpu,
         )
         for i in range(RVQ_layers)

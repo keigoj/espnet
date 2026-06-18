@@ -1,7 +1,7 @@
 batch_type: numel
-batch_bins: 3200000
+batch_bins: 3000000
 accum_grad: 1
-max_epoch: 100
+max_epoch: 50
 patience: none
 # The initialization method for model parameters
 init: xavier_uniform

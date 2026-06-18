@@ -25,7 +25,7 @@ datadir=dump/raw    # Directory for the source speech data used to dump feature 
 featdir=dump/hubert_feats   # Directory for the dumped features and labels.
 km_dir=             # Directory for the kmeans models
 dictdir=            # Directory for the fairseq dictionary (only used for hubert training)
-alignment_phoneme_dir="data/mfa_phoneme_alignment"  # Directory for alignment labels
+alignment_phoneme_dir=  # Directory for alignment labels e.g. "data/mfa_phoneme_alignment"
 phn_sets="dev"      # Datasets of alignment used to measure the pseudo-label quality
 upsample=           # Upsampling rate of pseudo-labels to measure the pseudo-lable quality
 use_gpu=false       # Whether to use gpu in feature extraction
@@ -40,6 +40,13 @@ storage_save_mode=false     # Save storage on SSL feature extraction
                             # If true, feature extraction and kmeans clustering on the fly
 
 RVQ_layers=1
+kmeans_method=base          # base / phone-based / anchore-based
+label_rspecifier=           # Optional phoneme/frame labels rspecifier for phone-based kmeans
+label_filetype=text         # mat / hdf5 / text_int / text
+anchor_center_path=         # Anchor centers path for anchore-based kmeans
+lambda_anchor=1.0           # Anchor regularization weight
+anchor_mode=cluster         # cluster / frame
+one_to_one=false            # One-to-one anchor mapping for anchore-based kmeans
 
 feature_conf=       # feature configuration in json string format
 feature_type=mfcc   # mfcc / fairseq_hubert / espnet_hubert
@@ -205,6 +212,26 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ] && ! [[ " ${skip_stages} " =~ [
         log "Subsampling ${portion_nutt} utterances for Kmeans training."
     fi
 
+    if [ "${kmeans_method}" = "phone-based" ] && [ -z "${label_rspecifier}" ]; then
+        log "Error: --label_rspecifier is required for --kmeans_method phone-based"
+        exit 2
+    fi
+    if [ "${kmeans_method}" = "anchore-based" ] && [ -z "${anchor_center_path}" ]; then
+        log "Error: --anchor_center_path is required for --kmeans_method anchore-based"
+        exit 2
+    fi
+
+    _kmeans_extra_opts="--kmeans_method ${kmeans_method} --lambda_anchor ${lambda_anchor} --anchor_mode ${anchor_mode}"
+    if [ -n "${label_rspecifier}" ]; then
+        _kmeans_extra_opts+=" --label_rspecifier ${label_rspecifier} --label_filetype ${label_filetype}"
+    fi
+    if [ -n "${anchor_center_path}" ]; then
+        _kmeans_extra_opts+=" --anchor_center_path ${anchor_center_path}"
+    fi
+    if ${one_to_one}; then
+        _kmeans_extra_opts+=" --one_to_one"
+    fi
+
     # It typically requires 120GB RAM to run kmeans steps.
     ${cpu_cmd} --num_threads ${num_threads} ${_logdir}/learn_kmeans.log \
         ${python} pyscripts/utils/learn_kmeans.py \
@@ -213,6 +240,7 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ] && ! [[ " ${skip_stages} " =~ [
             --RVQ_layers ${RVQ_layers} \
             --percent -1 \
             --in_filetype mat \
+            ${_kmeans_extra_opts} \
             "scp:${km_dir}/train.scp" || exit 1;
 fi
 
@@ -269,11 +297,17 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && ! [[ " ${skip_stages} " =~ [
                 > ${_dump_dir}/logdir/utt2num_samples.${n}
         done
 
+        if [ "${kmeans_method}" = "phone-based" ] || [ "${kmeans_method}" = "anchore-based" ]; then
+            _km_path="${km_dir}/km_${nclusters}.npy"
+        else
+            _km_path="${km_dir}/km_${nclusters}.mdl"
+        fi
+
         ${_cmd} JOB=1:${_nj} "${_dump_dir}"/logdir/inference_pseudo_labels_km${nclusters}.JOB.log \
             ${python} pyscripts/feats/dump_km_label.py \
                 ${_opts} \
                 --audio_sample_rate "${audio_sample_rate}" \
-                --km_path "${km_dir}/km_${nclusters}.mdl" \
+                --km_path "${_km_path}" \
                 --RVQ_layers "${RVQ_layers}" \
                 --out_filetype "mat" \
                 --use_gpu ${use_gpu} \
@@ -290,6 +324,10 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && ! [[ " ${skip_stages} " =~ [
             for n in $(seq ${_nj}); do
                 cat "${_dump_dir}"/logdir/pseudo_labels_${tail_}.${n}.txt || exit 1;
             done | sed 's/ \[ \| \]//g' | sort -u > "${_dump_dir}"/pseudo_labels_${tail_}.txt || exit 1;
+            if [ -n "${kmeans_method}" ]; then
+                cp -f "${_dump_dir}/pseudo_labels_${tail_}.txt" \
+                    "${_dump_dir}/pseudo_labels_${kmeans_method}_${tail_}.txt"
+            fi
         done
     done
 fi

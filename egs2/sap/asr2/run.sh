@@ -6,31 +6,21 @@ set -u
 set -o pipefail
 
 
-kmeans_feature="hubert_asr/21"  # use model_type/layer_index
+kmeans_feature="wavlm_large/21"  # use model_type/layer_index
 nclusters=2000
 
 src_lang=$(echo "${kmeans_feature}_km${nclusters}" | tr "/" "_")
 tgt_lang=en
 
-data_name="dys+ctl"
-
-if [ -z "${data_name}" ]; then
-    data_dir="data"
-    train_set="train"
-    valid_set="dev"
-    test_sets="test"
-else
-    data_dir="data/${data_name}"
-    train_set="${data_name}/train"
-    valid_set="${data_name}/dev"
-    test_sets="${data_name}/test"
-fi
+train_set="train"
+train_dev="dev"
+test_sets="dev"
 
 asr_config=conf/train_discrete_asr_e_branchformer1_1gpu.yaml
 inference_config=conf/decode_ctc0.3.yaml
 
-src_nbpe=4000   # I use src_nbpe=6000 for 2000-cluster kmeans.
-tgt_nbpe=400   # if token_joint is True, then only tgt_nbpe is used
+src_nbpe=6000   # I use src_nbpe=6000 for 2000-cluster kmeans.
+tgt_nbpe=5000   # if token_joint is True, then only tgt_nbpe is used
 
 # ts: true sequence
 # rm: deduplicated sequence which removes duplicated tokens
@@ -46,7 +36,7 @@ tgt_case="ts"
     --tgt_lang ${tgt_lang} \
     --src_token_type "bpe" \
     --src_nbpe $src_nbpe \
-    --tgt_token_type "char" \
+    --tgt_token_type "bpe" \
     --tgt_nbpe $tgt_nbpe \
     --src_case ${src_case} \
     --tgt_case ${tgt_case} \
@@ -55,10 +45,9 @@ tgt_case="ts"
     --asr_config "${asr_config}" \
     --inference_config "${inference_config}" \
     --train_set "${train_set}" \
-    --valid_set "${valid_set}" \
+    --valid_set "${train_dev}" \
     --test_sets "${test_sets}" \
     --src_bpe_train_text "dump/raw/${train_set}_sp/text.${src_case}.${src_lang}" \
     --tgt_bpe_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --lm_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
-    --local_data_opts "--speaker_groups ctl,dys --datadir ${data_dir}" \
-    --gpu_inference false "$@"
+    --portion 0.1 "$@"

@@ -229,7 +229,7 @@ AUDIOCAPS=
 CLOTHO_CHATGPT_MIXUP=
 EDACC=downloads
 IPAPACK_PLUS=downloads
-UASPEECH=~/dataset/UASpeech/UASpeech_noisereduce
+UASPEECH=~/dataset/UASpeech/UASpeech_noisereduce_trim
 
 # For only CMU TIR environment
 if [[ "$(hostname)" == tir* ]]; then

@@ -28,7 +28,7 @@ def frame_generator(wav, sr, frame_ms=30):
             frame = np.pad(frame, (0, frame_len - len(frame)))
         yield frame, start, min(end, len(wav))
 
-def vad_trim(wav, sr, frame_ms=20, aggressiveness=2, hangover_frames=1, min_voiced_run=10, tail_min_run=10):
+def vad_trim(wav, sr, frame_ms=20, aggressiveness=3, hangover_frames=1, min_voiced_run=10, tail_min_run=10):
     if frame_ms not in (10, 20, 30):
         raise ValueError("frame_ms must be one of 10, 20, or 30 ms for webrtcvad.")
     frame_len = int(sr * frame_ms / 1000)
