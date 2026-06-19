@@ -34,6 +34,8 @@ def format_feature_conf_str(feature_conf: str):
     feature_conf = re.sub(r"([\w\.\-/]+)", r'"\1"', feature_conf)
     # Replacing = with :
     feature_conf = re.sub(r"=", ": ", feature_conf)
+    # Restoring JSON boolean/null literals after quoting bare values.
+    feature_conf = re.sub(r':\s*"(true|false|null)"', r": \1", feature_conf)
     try:
         feature_conf = json.loads(feature_conf)
     except Exception as e:

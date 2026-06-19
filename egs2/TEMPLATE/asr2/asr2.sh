@@ -66,8 +66,10 @@ nclusters=2000              # The number of clusters for discrete tokenss
 storage_save_mode=true      # Save storage on SSL feature extraction
                             # If true, feature extraction and kmeans clustering on the fly
 gpu_kmeans=true             # Whether to use gpu for kmeans.
-hubert_asr_model_path=../../uaspeech/asr1/ckpt/hubert_asr_large.pth
+hubert_asr_upstream=hf_hubert_custom
+hubert_asr_model_path=facebook/hubert-large-ls960-ft
 hubert_asr_download_dir=ckpt
+hubert_asr_extra_conf=
 hubert_asr_normalize=false
 codec_choice=ESPnet
 codec_checkpoint_path=      # path to codec checkpoint file
@@ -213,8 +215,10 @@ Options:
     --nclusters         # The number of clusters for discrete tokens (default="${nclusters}").
     --storage_save_mode # Save storage on SSL feature extraction. If true, feature extraction and kmeans clustering on the fly (default="${storage_save_mode}").
     --gpu_kmeans        # Whether to use gpu for kmeans (default="${gpu_kmeans}").
-    --hubert_asr_model_path # Path to the fairseq HuBERT ASR checkpoint for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_model_path}").
+    --hubert_asr_upstream # S3PRL upstream for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_upstream}").
+    --hubert_asr_model_path # Path or HF model ID for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_model_path}").
     --hubert_asr_download_dir # Download/cache directory for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_download_dir}").
+    --hubert_asr_extra_conf # Optional S3PRL extra_conf for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_extra_conf}").
     --hubert_asr_normalize # S3PRL normalize setting for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_normalize}").
 
     # Tokenization related
@@ -487,8 +491,8 @@ else
     layer=$(echo "${kmeans_feature}" | cut -d/ -f2)
     if [ -z "${kmeans_feature_conf}" ]; then
         if [ "${kmeans_feature_type}" = "hubert_asr" ]; then
-            s3prl_conf="{upstream=hubert_custom,path_or_url=${hubert_asr_model_path},extra_conf={fairseq=true},normalize=${hubert_asr_normalize}}"
-            kmeans_feature_conf="{type=s3prl,conf={s3prl_conf=${s3prl_conf},download_dir=${hubert_asr_download_dir},layer=${layer},multilayer_feature=False}}"
+            s3prl_conf="{upstream=${hubert_asr_upstream},path_or_url=${hubert_asr_model_path},normalize=${hubert_asr_normalize}}"
+            kmeans_feature_conf="{type=s3prl,conf={s3prl_conf=${s3prl_conf},download_dir=${hubert_asr_download_dir},multilayer_feature=false,layer=${layer}}}"
         else
             # TODO(simpleoier): to support features beyond s3prl
             s3prl_conf="{upstream=${kmeans_feature_type}}"
@@ -496,7 +500,7 @@ else
         fi
     fi
 fi
-km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${nclusters}clusters
+km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}_${nclusters}clusters
 
 # Set tag for naming of model directory
 if [ -z "${asr_tag}" ]; then
@@ -807,7 +811,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
 
     if [ "${tokenization_choice}" == "ssl" ]; then
         scripts/feats/perform_kmeans.sh \
-            --stage 1 --stop-stage 5 \
+            --stage 2 --stop-stage 5 \
             --train_set "${train_set}" \
             --dev_set "${_dev_set}" \
             --other_sets "${test_sets} ${train_sp_sets}" \
@@ -843,6 +847,10 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
         if [ -n "${layer}" ]; then
             _suf="layer${layer}"
         fi
+        pseudo_label_name="pseudo_labels_km${nclusters}.txt"
+        if [ -n "${kmeans_method}" ]; then
+            pseudo_label_name="pseudo_labels_${kmeans_method}_km${nclusters}.txt"
+        fi
 
         if [ "${src_case}" = ts ]; then
             echo "keep the original discrete token sequence"
@@ -856,7 +864,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
                         }
                         print($1,out);
                     }' "${km_dir}/../"distinct_cjk_token_lists \
-                    "${data_extract}/${kmeans_feature_type}/${_suf}/${dset}/pseudo_labels_km${nclusters}.txt" \
+                    "${data_extract}/${kmeans_feature_type}/${_suf}/${dset}/${pseudo_label_name}" \
                     > "${data_extract}/${kmeans_feature_type}/${_suf}/${dset}"/text.${src_case}.${src_lang}
             done
         elif [ "${src_case}" = rm ]; then
@@ -871,7 +879,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
                         }
                         print($1,out);
                     }' "${km_dir}/../"distinct_cjk_token_lists \
-                    "${data_extract}/${kmeans_feature_type}/${_suf}/${dset}/pseudo_labels_km${nclusters}.txt" \
+                    "${data_extract}/${kmeans_feature_type}/${_suf}/${dset}/${pseudo_label_name}" \
                     > "${data_extract}/${kmeans_feature_type}/${_suf}/${dset}/text.${src_case}.${src_lang}"
             done
         else
@@ -1733,7 +1741,7 @@ if [ ${stage} -le 16 ] && [ ${stop_stage} -ge 16 ] && ! [[ " ${skip_stages} " =~
     if [ "${nlsyms_txt}" != none ]; then
         _opts+="--option ${nlsyms_txt} "
     fi
-    _km_dir="exp/kmeans/$(echo ${kmeans_feature} | tr '/' '_')_${nclusters}clusters"
+    _km_dir="exp/kmeans/$(echo ${kmeans_feature} | tr '/' '_')_${kmeans_method}_${nclusters}clusters"
     _opts+="--option ${_km_dir}/km_${nclusters}.mdl "
     # shellcheck disable=SC2086
     ${python} -m espnet2.bin.pack asr \

@@ -8,8 +8,9 @@ set -o pipefail
 
 kmeans_feature="wavlm_large/21"  # use model_type/layer_index
 nclusters=2000
+kmeans_method="base"
 
-src_lang=$(echo "${kmeans_feature}_km${nclusters}" | tr "/" "_")
+src_lang=$(echo "${kmeans_feature}_${kmeans_method}_km${nclusters}" | tr "/" "_")
 tgt_lang=en
 
 train_set="train"
@@ -28,7 +29,7 @@ src_case="rm"
 tgt_case="ts"
 
 ./asr2.sh \
-    --kmeans_opts "--batch_bins 4800000 --nj 4" \
+    --kmeans_opts "--batch_bins 1600000 --nj 4" \
     --kmeans_feature "${kmeans_feature}" \
     --nclusters "${nclusters}" \
     --ngpu 1 \
@@ -51,4 +52,4 @@ tgt_case="ts"
     --tgt_bpe_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --lm_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --portion 0.1 \
-    --kmeans_opts "" $@"
+    --kmeans_method "${kmeans_method}" "$@"

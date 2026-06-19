@@ -46,7 +46,7 @@ label_filetype=text         # mat / hdf5 / text_int / text
 anchor_center_path=         # Anchor centers path for anchore-based kmeans
 lambda_anchor=1.0           # Anchor regularization weight
 anchor_mode=cluster         # cluster / frame
-one_to_one=false            # One-to-one anchor mapping for anchore-based kmeans
+one_to_one=true             # One-to-one anchor mapping for anchore-based kmeans
 
 feature_conf=       # feature configuration in json string format
 feature_type=mfcc   # mfcc / fairseq_hubert / espnet_hubert
@@ -321,19 +321,23 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && ! [[ " ${skip_stages} " =~ [
             if [ ${RVQ_layers} -gt 1 ]; then
                 tail_="RVQ_$((layer_idx-1))_km${nclusters}"
             fi
+            out_tail_="${tail_}"
+            if [ -n "${kmeans_method}" ]; then
+                out_tail_="${kmeans_method}_${tail_}"
+            fi
             for n in $(seq ${_nj}); do
                 cat "${_dump_dir}"/logdir/pseudo_labels_${tail_}.${n}.txt || exit 1;
-            done | sed 's/ \[ \| \]//g' | sort -u > "${_dump_dir}"/pseudo_labels_${tail_}.txt || exit 1;
-            if [ -n "${kmeans_method}" ]; then
-                cp -f "${_dump_dir}/pseudo_labels_${tail_}.txt" \
-                    "${_dump_dir}/pseudo_labels_${kmeans_method}_${tail_}.txt"
-            fi
+            done | sed 's/ \[ \| \]//g' | sort -u > "${_dump_dir}"/pseudo_labels_${out_tail_}.txt || exit 1;
         done
     done
 fi
 
 
 km_tag=$(basename ${km_dir})
+pseudo_label_name="pseudo_labels_km${nclusters}.txt"
+if [ -n "${kmeans_method}" ]; then
+    pseudo_label_name="pseudo_labels_${kmeans_method}_km${nclusters}.txt"
+fi
 
 if [ -n "${alignment_phoneme_dir}" ]; then
     if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ] && ! [[ " ${skip_stages} " =~ [[:space:]]4[[:space:]] ]]; then
@@ -352,7 +356,7 @@ if [ -n "${alignment_phoneme_dir}" ]; then
             # TODO(simpleoier): This script and arguments design are specific to LibriSpeech dataset.
             ${python} local/measure_teacher_quality.py \
                 --lab_dir "${featdir}/${feature_type}/${suffix}" \
-                --lab_name "pseudo_labels_km${nclusters}.txt" \
+                --lab_name "${pseudo_label_name}" \
                 --lab_sets "${dev_set}" \
                 --phn_dir "${alignment_phoneme_dir}" \
                 --phn_sets ${phn_sets} \
@@ -372,8 +376,8 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
 
     for dset in "${train_set}" "${dev_set}" ${other_sets}; do
         label_dir="${featdir}/${feature_type}/${suffix}${dset}"
-        if [ -f "${label_dir}"/pseudo_labels_km${nclusters}.txt ]; then
-            cp "${label_dir}"/pseudo_labels_km${nclusters}.txt ${datadir}/${dset}/text.km.${km_tag}
+        if [ -f "${label_dir}/${pseudo_label_name}" ]; then
+            cp "${label_dir}/${pseudo_label_name}" ${datadir}/${dset}/text.km.${km_tag}
         fi
         utils/fix_data_dir.sh --utt_extra_files "text.km.${km_tag}" ${datadir}/${dset}
     done
