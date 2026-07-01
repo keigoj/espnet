@@ -41,7 +41,9 @@ storage_save_mode=false     # Save storage on SSL feature extraction
 
 RVQ_layers=1
 kmeans_method=base          # base / phone-based / anchore-based
-label_rspecifier=           # Optional phoneme/frame labels rspecifier for phone-based kmeans
+label_rspecifier=           # Optional phoneme/frame labels rspecifier. If set, kmeans
+                            # training utterances are filtered to entries with labels.
+                            # Labels are used by phone-based kmeans only.
 label_filetype=text         # mat / hdf5 / text_int / text
 anchor_center_path=         # Anchor centers path for anchore-based kmeans
 lambda_anchor=1.0           # Anchor regularization weight
@@ -98,6 +100,53 @@ if "${skip_train_kmeans}"; then
     skip_stages+=" 2"
 fi
 
+make_label_key_file() {
+    local rspecifier=$1
+    local key_file=$2
+    local path
+
+    case "${rspecifier}" in
+        ark:*)
+            log "Error: --label_rspecifier=${rspecifier} cannot be used for label-key filtering. Use a text/scp-style rspecifier."
+            exit 2
+            ;;
+        scp:*)
+            path="${rspecifier#scp:}"
+            ;;
+        *)
+            path="${rspecifier}"
+            ;;
+    esac
+
+    if [ ! -f "${path}" ]; then
+        log "Error: label rspecifier file does not exist: ${path}"
+        exit 2
+    fi
+
+    awk 'NF > 0 { print $1 }' "${path}" | sort -u > "${key_file}"
+}
+
+filter_data_dir_by_label() {
+    local src_dir=$1
+    local dst_dir=$2
+    local label_keys=$3
+
+    utils/copy_data_dir.sh --validate_opts --non-print "${src_dir}" "${dst_dir}"
+    for f in wav.scp utt2num_samples text utt2spk; do
+        if [ -f "${src_dir}/${f}" ]; then
+            utils/filter_scp.pl "${label_keys}" < "${src_dir}/${f}" > "${dst_dir}/${f}"
+        fi
+    done
+    if [ -f "${dst_dir}/utt2spk" ]; then
+        awk '{print $1, $2}' "${dst_dir}/utt2spk" | utils/utt2spk_to_spk2utt.pl > "${dst_dir}/spk2utt"
+    fi
+    if [ -f "${dst_dir}/utt2num_samples" ]; then
+        utils/fix_data_dir.sh --utt_extra_files "utt2num_samples" "${dst_dir}"
+    else
+        utils/fix_data_dir.sh "${dst_dir}"
+    fi
+}
+
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ] && ! [[ " ${skip_stages} " =~ [[:space:]]1[[:space:]] ]]; then
     log "stage 1: Dump ${feature_type} feature"
 
@@ -115,18 +164,34 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ] && ! [[ " ${skip_stages} " =~ [
     fi
 
     if ${storage_save_mode}; then
+        _label_filtered_train_set="${train_set}"
+        if [ -n "${label_rspecifier}" ]; then
+            _label_keys="${datadir}/${train_set}_label_keys"
+            make_label_key_file "${label_rspecifier}" "${_label_keys}"
+
+            _label_filtered_train_set="${train_set}_label_filtered"
+            filter_data_dir_by_label \
+                "${datadir}/${train_set}" \
+                "${datadir}/${_label_filtered_train_set}" \
+                "${_label_keys}"
+
+            _total_nutt=$(<"${datadir}/${train_set}"/wav.scp wc -l)
+            _label_nutt=$(<"${datadir}/${_label_filtered_train_set}"/wav.scp wc -l)
+            log "Filtered ${train_set} for kmeans feature dumping: ${_label_nutt}/${_total_nutt} utterances have labels."
+        fi
+
         _dsets="${train_set}_subset${portion}"
         mkdir -p "${datadir}/${_dsets}"
 
-        nutt=$(<"${datadir}/${train_set}"/wav.scp wc -l)
+        nutt=$(<"${datadir}/${_label_filtered_train_set}"/wav.scp wc -l)
         portion_nutt=$(echo ${nutt} ${portion} | awk '{print(int($1 * $2))}')
         portion_nutt=$(( portion_nutt > 0 ? portion_nutt : 1 ))
 
         utils/subset_data_dir.sh \
-            "${datadir}/${train_set}" ${portion_nutt} "${datadir}/${_dsets}"
+            "${datadir}/${_label_filtered_train_set}" ${portion_nutt} "${datadir}/${_dsets}"
         utils/filter_scp.pl ${datadir}/${_dsets}/utt2spk \
-            <${datadir}/${train_set}/utt2num_samples >${datadir}/${_dsets}/utt2num_samples
-        log "Subsampling ${portion_nutt} utterances for feature dumping."
+            <${datadir}/${_label_filtered_train_set}/utt2num_samples >${datadir}/${_dsets}/utt2num_samples
+        log "Subsampling ${portion_nutt} utterances for feature dumping from ${nutt} label-available utterances."
     else
         _dsets="${train_set} ${other_sets} ${dev_set}"
     fi
@@ -199,17 +264,34 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ] && ! [[ " ${skip_stages} " =~ [
         _dset="${train_set}"
     fi
 
+    _train_feats_scp="${featdir}/${feature_type}/${suffix}${_dset}/feats.scp"
+    if [ -n "${label_rspecifier}" ]; then
+        _label_keys="${_logdir}/label_keys"
+        _filtered_feats_scp="${_logdir}/label_filtered_feats.scp"
+        make_label_key_file "${label_rspecifier}" "${_label_keys}"
+        utils/filter_scp.pl "${_label_keys}" < "${_train_feats_scp}" > "${_filtered_feats_scp}"
+
+        _total_nutt=$(<"${_train_feats_scp}" wc -l)
+        _label_nutt=$(<"${_filtered_feats_scp}" wc -l)
+        if [ "${_label_nutt}" -eq 0 ]; then
+            log "Error: no kmeans training utterances remain after filtering by ${label_rspecifier}"
+            exit 2
+        fi
+        log "Filtered kmeans training candidates: ${_label_nutt}/${_total_nutt} utterances have labels."
+        _train_feats_scp="${_filtered_feats_scp}"
+    fi
+
     # select portion of data
     if (( $(echo "${_portion} >= 1.0" | bc -l) )); then
-        cp "${featdir}/${feature_type}/${suffix}${_dset}"/feats.scp "${km_dir}/train.scp"
+        cp "${_train_feats_scp}" "${km_dir}/train.scp"
     else
-        nutt=$(<"${featdir}/${feature_type}/${suffix}${_dset}"/feats.scp wc -l)
+        nutt=$(<"${_train_feats_scp}" wc -l)
         portion_nutt=$(echo ${nutt} ${_portion} | awk '{print(int($1 * $2)+1)}')
 
         subset_scp.pl \
-            ${portion_nutt} ${featdir}/${feature_type}/${suffix}${_dset}/feats.scp \
+            ${portion_nutt} "${_train_feats_scp}" \
             > "${km_dir}/train.scp" || exit 1;
-        log "Subsampling ${portion_nutt} utterances for Kmeans training."
+        log "Subsampling ${portion_nutt} utterances for Kmeans training from ${nutt} label-available utterances."
     fi
 
     if [ "${kmeans_method}" = "phone-based" ] && [ -z "${label_rspecifier}" ]; then
@@ -222,7 +304,7 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ] && ! [[ " ${skip_stages} " =~ [
     fi
 
     _kmeans_extra_opts="--kmeans_method ${kmeans_method} --lambda_anchor ${lambda_anchor} --anchor_mode ${anchor_mode}"
-    if [ -n "${label_rspecifier}" ]; then
+    if [ "${kmeans_method}" = "phone-based" ] && [ -n "${label_rspecifier}" ]; then
         _kmeans_extra_opts+=" --label_rspecifier ${label_rspecifier} --label_filetype ${label_filetype}"
     fi
     if [ -n "${anchor_center_path}" ]; then
@@ -354,7 +436,7 @@ if [ -n "${alignment_phoneme_dir}" ]; then
 
         if [ -d "${alignment_phoneme_dir}" ]; then
             # TODO(simpleoier): This script and arguments design are specific to LibriSpeech dataset.
-            ${python} local/measure_teacher_quality.py \
+            ${python} pyscripts/feats/measure_teacher_quality.py \
                 --lab_dir "${featdir}/${feature_type}/${suffix}" \
                 --lab_name "${pseudo_label_name}" \
                 --lab_sets "${dev_set}" \
