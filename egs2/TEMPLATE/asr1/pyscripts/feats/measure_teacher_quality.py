@@ -71,11 +71,15 @@ def comp_avg_seg_dur(labs_list):
     n_segs = 0
     for labs in labs_list:
         labs = np.array(labs)
+        if len(labs) == 0:
+            continue
         edges = np.zeros(len(labs)).astype(bool)
         edges[0] = True
         edges[1:] = labs[1:] != labs[:-1]
         n_frms += len(edges)
         n_segs += edges.astype(int).sum()
+    if n_segs == 0:
+        return 0.0
     return n_frms / n_segs
 
 
@@ -100,6 +104,8 @@ def comp_joint_prob(uid2refs, uid2hyps):
         hyps = hyps[:min_len]
         cnts.update(zip(refs, hyps))
     tot = sum(cnts.values())
+    if tot == 0:
+        raise ValueError("No overlapping non-empty reference and hypothesis labels")
 
     ref_set = sorted({ref for ref, _ in cnts.keys()})
     hyp_set = sorted({hyp for _, hyp in cnts.keys()})
@@ -117,8 +123,9 @@ def read_phn(tsv_path, rm_stress=True):
     uid2phns = {}
     with open(tsv_path) as f:
         for line in f:
-            uid, phns = line.rstrip().split("\t")
-            phns = phns.split(",")
+            parts = line.rstrip("\n").split("\t", 1)
+            uid = parts[0]
+            phns = parts[1].split(",") if len(parts) > 1 and parts[1] else []
             if rm_stress:
                 phns = [re.sub("[0-9]", "", phn) for phn in phns]
             uid2phns[uid] = phns
@@ -126,15 +133,28 @@ def read_phn(tsv_path, rm_stress=True):
 
 
 def read_lab(lab_path, pad_len=0, upsample=1):
+    labs_list = []
     with open(lab_path) as f:
-        labs_list = [
-            (
-                line.rstrip().split()[0],
-                pad(line.rstrip().split()[1:], pad_len).repeat(upsample),
-            )
-            for line in f
-        ]
+        for line in f:
+            parts = line.rstrip().split()
+            if len(parts) == 0:
+                continue
+            labs = parts[1:]
+            if len(labs) == 0:
+                labs = np.array(labs)
+            else:
+                labs = pad(labs, pad_len).repeat(upsample)
+            labs_list.append((parts[0], labs))
     return dict(labs_list)
+
+
+def filter_empty_refs(uid2refs, uid2hyps, verbose=False):
+    empty_refs = [uid for uid, refs in uid2refs.items() if len(refs) == 0]
+    if verbose and empty_refs:
+        print(f"Skip {len(empty_refs)} utterances with empty reference labels")
+    uid2refs = {uid: refs for uid, refs in uid2refs.items() if len(refs) > 0}
+    uid2hyps = {uid: hyps for uid, hyps in uid2hyps.items() if uid in uid2refs}
+    return uid2refs, uid2hyps
 
 
 def main_lab_lab(
@@ -190,6 +210,7 @@ def main_phn_lab(
 
 
 def _main(uid2refs, uid2hyps, verbose):
+    uid2refs, uid2hyps = filter_empty_refs(uid2refs, uid2hyps, verbose)
     (p_xy, ref2pid, hyp2lid, tot, frmdiff, skipped) = comp_joint_prob(
         uid2refs, uid2hyps
     )
