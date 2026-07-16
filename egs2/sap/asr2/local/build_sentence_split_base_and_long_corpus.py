@@ -15,7 +15,7 @@ MIN_DURATION = 0.1
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location(
-    "sentence_builder", SCRIPT_DIR / "build_sentence_kaldi_from_mfa.py"
+    "sentence_builder", SCRIPT_DIR / "sap_sentence_split_utils.py"
 )
 sentence_builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sentence_builder)

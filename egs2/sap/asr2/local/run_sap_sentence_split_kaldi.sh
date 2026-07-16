@@ -17,7 +17,7 @@ splits=()
 usage() {
   cat <<'EOF'
 Usage:
-  run_sentence_first_mfa_kaldi.sh --splits SPLIT [SPLIT ...] [options]
+  run_sap_sentence_split_kaldi.sh --splits SPLIT [SPLIT ...] [options]
 
 Options:
   --base DIR                 SAP_0430_processed-style data root
@@ -31,7 +31,7 @@ Options:
   --skip-original-align      Reuse existing mfa/aligned/<split>_textgrid
 
 Example:
-  local/run_sentence_first_mfa_kaldi.sh --splits test1 test2
+  local/run_sap_sentence_split_kaldi.sh --splits test1 test2
 EOF
 }
 
@@ -104,7 +104,7 @@ source "$conda_sh"
 conda activate "$conda_env"
 
 echo "==> Preparing original Kaldi data and MFA corpus"
-python "$script_dir/prepare_kaldi_and_mfa_corpus.py" --splits "${splits[@]}"
+python "$script_dir/prepare_original_kaldi_and_mfa_corpus.py" --splits "${splits[@]}"
 
 if [[ "$skip_original_align" -eq 0 ]]; then
   for split in "${splits[@]}"; do
@@ -127,7 +127,7 @@ else
 fi
 
 echo "==> Building sentence-first base Kaldi and long-sentence corpus"
-python "$script_dir/build_sentence_first_base_and_corpus.py" --splits "${splits[@]}"
+python "$script_dir/build_sentence_split_base_and_long_corpus.py" --splits "${splits[@]}"
 
 for split in "${splits[@]}"; do
   long_tsv="$base/mfa/analysis_sentence_first/${split}_long_sentences_for_mfa_segment.tsv"
@@ -153,7 +153,7 @@ for split in "${splits[@]}"; do
 done
 
 echo "==> Exporting MFA segment DBs to align corpus"
-python "$script_dir/export_sentence_first_segment_db.py" --splits "${splits[@]}"
+python "$script_dir/export_mfa_segment_db_to_align_corpus.py" --splits "${splits[@]}"
 
 for split in "${splits[@]}"; do
   segment_tsv="$base/mfa/analysis_sentence_first/${split}_sentence_first_mfa_segment_segments.tsv"
@@ -179,6 +179,6 @@ for split in "${splits[@]}"; do
 done
 
 echo "==> Building final Kaldi data with 50Hz phone labels"
-python "$script_dir/build_sentence_first_mfa_final.py" --splits "${splits[@]}"
+python "$script_dir/build_final_segmented_kaldi_with_phones.py" --splits "${splits[@]}"
 
 echo "==> Done: $base/kaldi_sentence_first_mfa_with_unaligned_short"
