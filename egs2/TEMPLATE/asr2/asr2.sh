@@ -75,6 +75,7 @@ codec_choice=ESPnet
 codec_checkpoint_path=      # path to codec checkpoint file
 codec_config_path=          # path to codec config file
 kmeans_method=base          # base / phone-based / anchore-based
+lambda_anchor=
 
 # Tokenization related
 tokenization_choice=ssl # ssl or codec
@@ -220,6 +221,7 @@ Options:
     --hubert_asr_download_dir # Download/cache directory for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_download_dir}").
     --hubert_asr_extra_conf # Optional S3PRL extra_conf for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_extra_conf}").
     --hubert_asr_normalize # S3PRL normalize setting for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_normalize}").
+    --lambda_anchor    # Anchor regularization weight for phone/anchor-based kmeans. Empty means no lambda tag/pass-through (default="${lambda_anchor}").
 
     # Tokenization related
     --oov                     # Out of vocabulary symbol (default="${oov}").
@@ -500,7 +502,18 @@ else
         fi
     fi
 fi
-km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}_${nclusters}clusters
+
+lambda_tag=
+if { [ "${kmeans_method}" = "phone-based" ] || [ "${kmeans_method}" = "anchore-based" ]; } \
+    && [ -n "${lambda_anchor}" ]; then
+    lambda_tag="_lam${lambda_anchor//./p}"
+fi
+
+if [ -n "${lambda_tag}" ]; then
+    km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}${lambda_tag}_${nclusters}clusters
+else
+    km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}_${nclusters}clusters
+fi
 
 # Set tag for naming of model directory
 if [ -z "${asr_tag}" ]; then
@@ -534,6 +547,9 @@ if [ -z "${asr_tag}" ]; then
     fi
     if [ -n "${kmeans_method}" ]; then
         asr_tag+="_km_${kmeans_method}"
+    fi
+    if [ -n "${lambda_tag}" ]; then
+        asr_tag+="${lambda_tag}"
     fi
 fi
 if [ -z "${lm_tag}" ]; then
@@ -830,6 +846,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
             --cpu_cmd "${train_cmd}" \
             --cuda_cmd "${cuda_cmd}" \
             --kmeans_method "${kmeans_method}" \
+            ${lambda_anchor:+--lambda_anchor "${lambda_anchor}"} \
             ${kmeans_opts}
 
         log "Stage 5b: Prepare token_list and convert number indices to CJK tokens"
@@ -849,7 +866,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
         fi
         pseudo_label_name="pseudo_labels_km${nclusters}.txt"
         if [ -n "${kmeans_method}" ]; then
-            pseudo_label_name="pseudo_labels_${kmeans_method}_km${nclusters}.txt"
+            pseudo_label_name="pseudo_labels_${kmeans_method}${lambda_tag}_km${nclusters}.txt"
         fi
 
         if [ "${src_case}" = ts ]; then
@@ -1741,7 +1758,7 @@ if [ ${stage} -le 16 ] && [ ${stop_stage} -ge 16 ] && ! [[ " ${skip_stages} " =~
     if [ "${nlsyms_txt}" != none ]; then
         _opts+="--option ${nlsyms_txt} "
     fi
-    _km_dir="exp/kmeans/$(echo ${kmeans_feature} | tr '/' '_')_${kmeans_method}_${nclusters}clusters"
+    _km_dir="${km_dir}"
     _opts+="--option ${_km_dir}/km_${nclusters}.mdl "
     # shellcheck disable=SC2086
     ${python} -m espnet2.bin.pack asr \

@@ -6,16 +6,22 @@ set -u
 set -o pipefail
 
 
-kmeans_feature="wavlm_large/21"  # use model_type/layer_index
+kmeans_feature="hubert_asr/24"  # use model_type/layer_index eg. hubert_asr/12, wavlm_large/21
 nclusters=2000
-kmeans_method="base"
+kmeans_method="phone-based" # base / phone-based / anchore-based
+lambda_anchor=1.0
 
-src_lang=$(echo "${kmeans_feature}_${kmeans_method}_km${nclusters}" | tr "/" "_")
+lambda_tag=
+if [ -n "${lambda_anchor}" ]; then
+    lambda_tag="_lam${lambda_anchor//./p}"
+fi
+
+src_lang=$(echo "${kmeans_feature}_${kmeans_method}${lambda_tag}_km${nclusters}" | tr "/" "_")
 tgt_lang=en
 
 train_set="train"
 train_dev="dev"
-test_sets="dev"
+test_sets="test1 test2"
 
 asr_config=conf/train_discrete_asr_e_branchformer1_1gpu.yaml
 inference_config=conf/decode_ctc0.3.yaml
@@ -29,7 +35,7 @@ src_case="rm"
 tgt_case="ts"
 
 ./asr2.sh \
-    --kmeans_opts "--batch_bins 1600000 --nj 4" \
+    --kmeans_opts "--batch_bins 3200000 --nj 4" \
     --kmeans_feature "${kmeans_feature}" \
     --nclusters "${nclusters}" \
     --ngpu 1 \
@@ -51,5 +57,7 @@ tgt_case="ts"
     --src_bpe_train_text "dump/raw/${train_set}_sp/text.${src_case}.${src_lang}" \
     --tgt_bpe_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --lm_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
-    --portion 0.1 \
-    --kmeans_method "${kmeans_method}" "$@"
+    --portion 0.05 \
+    --gpu_inference false \
+    --kmeans_method "${kmeans_method}" \
+    ${lambda_anchor:+--lambda_anchor "${lambda_anchor}"} "$@"

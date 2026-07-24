@@ -68,6 +68,14 @@ log "$0 $*"
 
 . ./path.sh
 
+# Keep the pseudo-label filename distinct when the K-means objective is
+# controlled by lambda_anchor.
+lambda_tag=
+if { [ "${kmeans_method}" = "phone-based" ] || [ "${kmeans_method}" = "anchore-based" ]; } \
+    && [ -n "${lambda_anchor}" ]; then
+    lambda_tag="_lam${lambda_anchor//./p}"
+fi
+
 if [ $# -ne 0 ]; then
     echo "Usage: $0 <--nclusters:100> <--feature_type:mfcc>"
     exit 0
@@ -123,7 +131,7 @@ make_label_key_file() {
         exit 2
     fi
 
-    awk 'NF > 0 { print $1 }' "${path}" | sort -u > "${key_file}"
+    awk 'NF > 1 { print $1 }' "${path}" | sort -u > "${key_file}"
 }
 
 filter_data_dir_by_label() {
@@ -405,7 +413,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && ! [[ " ${skip_stages} " =~ [
             fi
             out_tail_="${tail_}"
             if [ -n "${kmeans_method}" ]; then
-                out_tail_="${kmeans_method}_${tail_}"
+                out_tail_="${kmeans_method}${lambda_tag}_${tail_}"
             fi
             for n in $(seq ${_nj}); do
                 cat "${_dump_dir}"/logdir/pseudo_labels_${tail_}.${n}.txt || exit 1;
@@ -418,7 +426,7 @@ fi
 km_tag=$(basename ${km_dir})
 pseudo_label_name="pseudo_labels_km${nclusters}.txt"
 if [ -n "${kmeans_method}" ]; then
-    pseudo_label_name="pseudo_labels_${kmeans_method}_km${nclusters}.txt"
+    pseudo_label_name="pseudo_labels_${kmeans_method}${lambda_tag}_km${nclusters}.txt"
 fi
 
 if [ -n "${alignment_phoneme_dir}" ]; then
