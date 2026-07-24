@@ -644,6 +644,8 @@ def load_feature_shard(
 ):
     """Load feature shard from rspecifier."""
     feats = []
+    cropped = 0
+    cropped_examples = []
     for utt, feat in file_reader_helper(rspecifier, in_filetype):
         if label_dict:
             if utt not in label_dict:
@@ -652,11 +654,27 @@ def load_feature_shard(
             if lab.ndim == 1:
                 lab = lab[:, None]
             if lab.shape[0] != feat.shape[0]:
-                raise ValueError(
-                    f"Length mismatch for {utt}: feat {feat.shape[0]} vs label {lab.shape[0]}"
-                )
+                if abs(feat.shape[0] - lab.shape[0]) <= 1:
+                    cropped += 1
+                    if len(cropped_examples) < 5:
+                        cropped_examples.append((utt, feat.shape[0], lab.shape[0]))
+                    min_len = min(feat.shape[0], lab.shape[0])
+                    feat = feat[:min_len]
+                    lab = lab[:min_len]
+                else:
+                    raise ValueError(
+                        f"Length mismatch for {utt}: feat {feat.shape[0]} vs label {lab.shape[0]}"
+                    )
             feat = np.concatenate([feat, lab], axis=1) # feat: (T, D), lab: (T, 1)
         feats.append(feat)
+
+    if cropped > 0:
+        logger.warning(
+            "cropped %d feature/label pairs with <=1 frame mismatch in %s; examples=%s",
+            cropped,
+            rspecifier,
+            cropped_examples,
+        )
     
     if percent < 0:
         return np.concatenate(feats, axis=0)
