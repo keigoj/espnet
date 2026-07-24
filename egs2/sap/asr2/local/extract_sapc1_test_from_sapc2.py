@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -11,6 +12,80 @@ DEFAULT_SAPC2_ROOT = Path("/home/hojo/dataset/SAPC2-train-dev")
 DEFAULT_OUTPUT_ROOT = Path("/home/hojo/dataset/SAP0430_processed")
 SAPC2_MANIFEST_SPLITS = ("Train", "Dev")
 TARGET_SPLITS = ("test1", "test2")
+
+ONES = [
+    "ZERO",
+    "ONE",
+    "TWO",
+    "THREE",
+    "FOUR",
+    "FIVE",
+    "SIX",
+    "SEVEN",
+    "EIGHT",
+    "NINE",
+    "TEN",
+    "ELEVEN",
+    "TWELVE",
+    "THIRTEEN",
+    "FOURTEEN",
+    "FIFTEEN",
+    "SIXTEEN",
+    "SEVENTEEN",
+    "EIGHTEEN",
+    "NINETEEN",
+]
+TENS = {
+    20: "TWENTY",
+    30: "THIRTY",
+    40: "FORTY",
+    50: "FIFTY",
+    60: "SIXTY",
+    70: "SEVENTY",
+    80: "EIGHTY",
+    90: "NINETY",
+}
+ORDINALS = {
+    1: "FIRST",
+    2: "SECOND",
+    3: "THIRD",
+    4: "FOURTH",
+    5: "FIFTH",
+    6: "SIXTH",
+    7: "SEVENTH",
+    8: "EIGHTH",
+    9: "NINTH",
+    10: "TENTH",
+    11: "ELEVENTH",
+    12: "TWELFTH",
+    13: "THIRTEENTH",
+    14: "FOURTEENTH",
+    15: "FIFTEENTH",
+    16: "SIXTEENTH",
+    17: "SEVENTEENTH",
+    18: "EIGHTEENTH",
+    19: "NINETEENTH",
+    20: "TWENTIETH",
+    30: "THIRTIETH",
+    40: "FORTIETH",
+    50: "FIFTIETH",
+    60: "SIXTIETH",
+    70: "SEVENTIETH",
+    80: "EIGHTIETH",
+    90: "NINETIETH",
+}
+DIGITS = {
+    "0": "ZERO",
+    "1": "ONE",
+    "2": "TWO",
+    "3": "THREE",
+    "4": "FOUR",
+    "5": "FIVE",
+    "6": "SIX",
+    "7": "SEVEN",
+    "8": "EIGHT",
+    "9": "NINE",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +163,133 @@ def source_speaker_json(sapc2_root: Path, record: dict) -> Path:
     return sapc2_root / audio_relpath.parent / f"{record['speaker']}.json"
 
 
+def number_to_words(number: int) -> str:
+    if number < 0:
+        return "MINUS " + number_to_words(abs(number))
+    if number < 20:
+        return ONES[number]
+    if number < 100:
+        tens = (number // 10) * 10
+        remainder = number % 10
+        return TENS[tens] if remainder == 0 else f"{TENS[tens]} {ONES[remainder]}"
+    if number < 1000:
+        hundreds = number // 100
+        remainder = number % 100
+        words = f"{ONES[hundreds]} HUNDRED"
+        return words if remainder == 0 else f"{words} {number_to_words(remainder)}"
+    if 1000 < number < 2000 and number % 100 == 0:
+        return f"{number_to_words(number // 100)} HUNDRED"
+    if 1900 <= number <= 1999:
+        remainder = number % 100
+        return "NINETEEN HUNDRED" if remainder == 0 else f"NINETEEN {number_to_words(remainder)}"
+    if 2000 <= number <= 2099:
+        remainder = number % 100
+        return "TWO THOUSAND" if remainder == 0 else f"TWO THOUSAND {number_to_words(remainder)}"
+    if number < 1000000:
+        thousands = number // 1000
+        remainder = number % 1000
+        words = f"{number_to_words(thousands)} THOUSAND"
+        return words if remainder == 0 else f"{words} {number_to_words(remainder)}"
+    millions = number // 1000000
+    remainder = number % 1000000
+    words = f"{number_to_words(millions)} MILLION"
+    return words if remainder == 0 else f"{words} {number_to_words(remainder)}"
+
+
+def ordinal_to_words(number: int) -> str:
+    if number in ORDINALS:
+        return ORDINALS[number]
+    if number < 100:
+        tens = (number // 10) * 10
+        remainder = number % 10
+        return f"{TENS[tens]} {ORDINALS[remainder]}"
+    if number < 1000:
+        hundreds = number // 100
+        remainder = number % 100
+        prefix = f"{ONES[hundreds]} HUNDRED"
+        return prefix + ("TH" if remainder == 0 else f" {ordinal_to_words(remainder)}")
+    return number_to_words(number)
+
+
+def digit_sequence_to_words(sequence: str) -> str:
+    return " ".join(DIGITS[char] for char in sequence if char.isdigit())
+
+
+def normalize_text_for_wrd(original_text: str) -> str:
+    text = original_text
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"\{[^}]*\}", " ", text)
+    text = text.replace("&", " and ")
+
+    def replace_area_code(match: re.Match[str]) -> str:
+        return f"{match.group(1)} {digit_sequence_to_words(match.group(2))}"
+
+    text = re.sub(
+        r"(?i)\b(area code\s+)([0-9][0-9\-\s]{5,}[0-9])\b",
+        replace_area_code,
+        text,
+    )
+
+    def replace_order_number(match: re.Match[str]) -> str:
+        return f"{match.group(1)} {digit_sequence_to_words(match.group(2))}"
+
+    text = re.sub(r"(?i)\b(order number\s+)([0-9][0-9,\-\s]*[0-9])\b", replace_order_number, text)
+
+    def replace_currency(match: re.Match[str]) -> str:
+        symbol = match.group(1)
+        amount = int(match.group(2).replace(",", ""))
+        unit = {
+            "$": "DOLLAR" if amount == 1 else "DOLLARS",
+            "€": "EURO" if amount == 1 else "EUROS",
+            "£": "POUND" if amount == 1 else "POUNDS",
+        }[symbol]
+        return f"{number_to_words(amount)} {unit}"
+
+    text = re.sub(r"([$€£])\s*([0-9][0-9,]*)", replace_currency, text)
+
+    def replace_percent(match: re.Match[str]) -> str:
+        return f"{number_to_words(int(match.group(1).replace(',', '')))} PERCENT"
+
+    text = re.sub(r"\b([0-9][0-9,]*)\s*%", replace_percent, text)
+
+    def replace_time(match: re.Match[str]) -> str:
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        minute_words = "O " + ONES[minute] if 0 < minute < 10 else number_to_words(minute)
+        suffix = match.group(3)
+        suffix_words = f" {suffix[0].upper()} M" if suffix else ""
+        return f"{number_to_words(hour)} {minute_words}{suffix_words}"
+
+    text = re.sub(r"\b([0-9]{1,2}):([0-9]{2})\s*([AaPp][Mm])?\b", replace_time, text)
+
+    def replace_attached_ampm(match: re.Match[str]) -> str:
+        return f"{number_to_words(int(match.group(1)))} {match.group(2)[0].upper()} M"
+
+    text = re.sub(r"\b([0-9]{1,2})\s*([AaPp][Mm])\b", replace_attached_ampm, text)
+
+    def replace_ordinal(match: re.Match[str]) -> str:
+        return ordinal_to_words(int(match.group(1)))
+
+    text = re.sub(r"\b([0-9]+)(st|nd|rd|th)\b", replace_ordinal, text, flags=re.IGNORECASE)
+
+    def replace_number(match: re.Match[str]) -> str:
+        return number_to_words(int(match.group(0).replace(",", "")))
+
+    text = re.sub(r"\b[0-9][0-9,]*\b", replace_number, text)
+    text = re.sub(r"\b([AP])\.?M\.?\b", lambda match: f"{match.group(1)} M", text)
+    text = text.replace("'", "'")
+    text = re.sub(r"[^A-Za-z']+", " ", text.upper())
+    return " ".join(text.split())
+
+
+def normalize_without_parentheses(record: dict) -> str:
+    text = record.get("text", "")
+    if any(char.isdigit() for char in text) or any(symbol in text for symbol in "$€£%"):
+        return normalize_text_for_wrd(record.get("original_text", ""))
+    return text.upper()
+
+
 def extract_split(
     split: str,
     entries: list[tuple[str, str]],
@@ -161,7 +363,7 @@ def extract_split(
         tsv_lines.append(f"/projects/bczs/SAPC/data/processed/{split}/{wav_id}.wav\t{sample_count}")
         origin_lines.append(record.get("original_text", ""))
         with_parentheses_lines.append(record.get("norm_text_with_disfluency", "").upper())
-        without_parentheses_lines.append(record.get("text", "").upper())
+        without_parentheses_lines.append(normalize_without_parentheses(record))
         transcript_rows.append(
             "\t".join(
                 [

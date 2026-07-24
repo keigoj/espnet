@@ -103,6 +103,28 @@ export SAP_PROCESSED_DIR="$base"
 source "$conda_sh"
 conda activate "$conda_env"
 
+echo "==> Removing stale split-specific intermediate outputs"
+for split in "${splits[@]}"; do
+  rm -rf \
+    "$base/kaldi/$split" \
+    "$base/mfa/corpus/$split" \
+    "$base/kaldi_sentence_first_base/$split" \
+    "$base/kaldi_sentence_first_mfa_with_unaligned_short/$split" \
+    "$base/mfa/corpus_sentence_first_long_for_segment/$split" \
+    "$base/mfa/audio_sentence_first_long/$split" \
+    "$base/mfa/segmented/sentence_first_long/$split" \
+    "$base/mfa/corpus_sentence_first_segmented_for_align/$split" \
+    "$base/mfa/aligned/sentence_first_segmented_long/${split}_textgrid"
+  if [[ "$skip_original_align" -eq 0 ]]; then
+    rm -rf \
+      "$base/mfa/aligned/${split}_textgrid" \
+      "$base/mfa/temp/${split}_align"
+  fi
+  rm -rf \
+    "$base/mfa/temp/segment_sentence_first_long_$split" \
+    "$base/mfa/temp/align_sentence_first_segmented_long_$split"
+done
+
 echo "==> Preparing original Kaldi data and MFA corpus"
 python "$script_dir/prepare_original_kaldi_and_mfa_corpus.py" --splits "${splits[@]}"
 
