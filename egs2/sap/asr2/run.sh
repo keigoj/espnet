@@ -6,10 +6,11 @@ set -u
 set -o pipefail
 
 
-kmeans_feature="hubert_asr/24"  # use model_type/layer_index eg. hubert_asr/12, wavlm_large/21
+kmeans_feature="wavlm_large/21"  # use model_type/layer_index eg. hubert_asr/12, wavlm_large/21
 nclusters=2000
-kmeans_method="phone-based" # base / phone-based / anchore-based
-lambda_anchor=1.0
+kmeans_method="anchore-based" # base / phone-based / anchore-based
+lambda_anchor=1000
+anchor_center_path="../../librispeech_100/asr2/exp/kmeans/wavlm_large_21_base_2000clusters/km_2000.npy"
 
 lambda_tag=
 if [ -n "${lambda_anchor}" ]; then
@@ -18,6 +19,8 @@ fi
 
 src_lang=$(echo "${kmeans_feature}_${kmeans_method}${lambda_tag}_km${nclusters}" | tr "/" "_")
 tgt_lang=en
+
+asr_tag="${src_lang}_${tgt_lang}"
 
 train_set="train"
 train_dev="dev"
@@ -35,7 +38,9 @@ src_case="rm"
 tgt_case="ts"
 
 ./asr2.sh \
-    --kmeans_opts "--batch_bins 3200000 --nj 4" \
+    --kmeans_opts "--batch_bins 3200000 --nj 4 --stage 2 --stop-stage 5 \
+                    --label_rspecifier data/phoneme_alignment/train.utt2phones \
+                    --anchor_center_path ${anchor_center_path}" \
     --kmeans_feature "${kmeans_feature}" \
     --nclusters "${nclusters}" \
     --ngpu 1 \
@@ -60,4 +65,5 @@ tgt_case="ts"
     --portion 0.05 \
     --gpu_inference false \
     --kmeans_method "${kmeans_method}" \
+    --asr_tag "${asr_tag}" \
     ${lambda_anchor:+--lambda_anchor "${lambda_anchor}"} "$@"

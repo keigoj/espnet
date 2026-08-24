@@ -229,12 +229,15 @@ class PhoneBasedKMeans:
 
     def _update_centers(self, X: np.ndarray, phone: np.ndarray, assign: np.ndarray) -> np.ndarray:
         K, D = self.n_clusters, X.shape[1]
-        centers = np.zeros((K, D), dtype=np.float32)
+        if self.cluster_centers_ is None:
+            raise RuntimeError("cluster centers must be initialized before updating them.")
+        centers = np.asarray(self.cluster_centers_, dtype=np.float32).copy()
         
         for k in range(K):
             idx = np.where(assign == k)[0]
             
             if len(idx) == 0:
+                # Keep the previous center when no frame is assigned to this cluster.
                 continue
 
             Xk = X[idx]

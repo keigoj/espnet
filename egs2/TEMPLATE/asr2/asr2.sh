@@ -825,9 +825,9 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
         _dev_set="${valid_set}"
     fi
 
+            # --stage 1 --stop-stage 5 \
     if [ "${tokenization_choice}" == "ssl" ]; then
         scripts/feats/perform_kmeans.sh \
-            --stage 1 --stop-stage 5 \
             --train_set "${train_set}" \
             --dev_set "${_dev_set}" \
             --other_sets "${test_sets} ${train_sp_sets}" \

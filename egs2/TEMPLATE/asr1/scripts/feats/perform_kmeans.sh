@@ -25,9 +25,9 @@ datadir=dump/raw    # Directory for the source speech data used to dump feature 
 featdir=dump/hubert_feats   # Directory for the dumped features and labels.
 km_dir=             # Directory for the kmeans models
 dictdir=            # Directory for the fairseq dictionary (only used for hubert training)
-alignment_phoneme_dir=  # Directory for alignment labels e.g. "data/mfa_phoneme_alignment"
+alignment_phoneme_dir=data/phoneme_alignment  # Directory for alignment labels e.g. "data/mfa_phoneme_alignment"
 phn_sets="dev"      # Datasets of alignment used to measure the pseudo-label quality
-upsample=           # Upsampling rate of pseudo-labels to measure the pseudo-lable quality
+upsample=1          # Upsampling rate of pseudo-labels to measure the pseudo-lable quality
 use_gpu=false       # Whether to use gpu in feature extraction
 suffix=             # A suffix to distinguish the feature dump directory. Empty in usual cases.
 audio_format="wav"  # The audio format of the source speech (flac, wav, *_ark, etc)
@@ -344,6 +344,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && ! [[ " ${skip_stages} " =~ [
         _cmd="${cpu_cmd}"
     fi
 
+    # for dset in "test1" "test2"; do
     for dset in "${train_set}" "${dev_set}" ${other_sets}; do
         log "Extract labels to ${featdir}/${feature_type}/${suffix}${dset}"
 

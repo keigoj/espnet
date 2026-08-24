@@ -126,4 +126,6 @@ tools/ParallelWaveGAN
 egs*/*/*/exp_tmp
 egs*/*/*/dump_tmp
 egs*/*/*/ckpt
-
+egs2/uaspeech/asr2/local/data/F02_B1_C3_M2_trimmed.wav
+egs2/uaspeech/asr2/local/data/CF02_B1_C1_M2_trimmed.wav
+egs2/TEMPLATE/asr1/scripts/feats/perform_kmeans copy.sh
