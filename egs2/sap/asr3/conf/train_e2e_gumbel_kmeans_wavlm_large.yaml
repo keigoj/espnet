@@ -1,0 +1,111 @@
+# End-to-end SAP ASR:
+# waveform -> WavLM-large layer 21 -> differentiable K-means -> ASR.
+# run_e2e.sh controls which modules are frozen.  The base loss is ASR-only so
+# the fixed/quantizer/full comparison isolates the effect of task supervision.
+unused_parameters: true
+use_amp: true
+grad_clip: 5.0
+num_workers: 4
+batch_type: numel
+batch_bins: 2000000
+accum_grad: 16
+max_epoch: 90
+patience: none
+init: none
+best_model_criterion:
+-   - valid
+    - acc
+    - max
+keep_nbest_models: 10
+freeze_param:
+# Keep the convolutional feature extractor frozen even after staged unfreezing.
+# Remove this entry to fine-tune every WavLM parameter after the warm-up.
+- frontend.upstream.upstream.model.feature_extractor
+
+frontend: s3prl
+frontend_conf:
+    fs: 16k
+    frontend_conf:
+        upstream: wavlm_large
+        normalize: false
+    download_dir: ckpt
+    multilayer_feature: false
+    layer: 21
+
+specaug: null
+normalize: null
+preencoder: null
+
+encoder: e_branchformer
+encoder_conf:
+    output_size: 256
+    attention_heads: 4
+    attention_layer_type: rel_selfattn
+    pos_enc_layer_type: rel_pos
+    rel_pos_type: latest
+    cgmlp_linear_units: 1024
+    cgmlp_conv_kernel: 31
+    use_linear_after_conv: false
+    gate_activation: identity
+    num_blocks: 12
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    attention_dropout_rate: 0.1
+    input_layer: conv1d2
+    layer_drop_rate: 0.0
+    linear_units: 1024
+    positionwise_layer_type: linear
+    use_ffn: true
+    macaron_ffn: true
+    merge_conv_kernel: 31
+
+decoder: transformer
+decoder_conf:
+    attention_heads: 4
+    linear_units: 2048
+    num_blocks: 6
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    self_attention_dropout_rate: 0.1
+    src_attention_dropout_rate: 0.1
+    layer_drop_rate: 0.0
+
+model: gumbel_kmeans
+model_conf:
+    # Do not build WavLM during collect-stats; raw sample lengths are enough.
+    extract_feats_in_collect_stats: false
+    ctc_weight: 0.3
+    lsm_weight: 0.1
+    length_normalized_loss: false
+    asr_weight: 1.0
+    kmeans_weight: 0.0
+    commitment_weight: 0.0
+    diversity_weight: 0.0
+    ot_weight: 0.0
+    # null: stochastic hard Gumbel assignments in training and deterministic
+    # nearest-centroid assignments in evaluation. run_e2e.sh overrides this
+    # with false in fixed mode.
+    quantizer_sample_gumbel: null
+    quantizer_conf:
+        num_clusters: 2000
+        temperature: 2.0
+        min_temperature: 0.5
+        temperature_decay: 0.999995
+        hard: true
+        normalize_inputs: false
+        # Paper setting: logits = -||feature - centroid||^2 (sigma^2 = 1).
+        logit_scale: 1.0
+        initial_centroid_path: ../asr2/exp/kmeans/wavlm_large_21_base_2000clusters/km_2000.npy
+        initialize_from_reference: false
+
+optim: adamw
+optim_conf:
+    lr: 0.0001
+    weight_decay: 0.000001
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 5000
+
+log_interval: 100
+cudnn_deterministic: false
+cudnn_benchmark: false

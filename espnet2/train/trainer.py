@@ -106,6 +106,8 @@ class TrainerOptions:
     create_graph_in_tensorboard: bool
     gradient_as_bucket_view: bool
     ddp_comm_hook: Optional[str]
+    staged_freeze_param: Sequence[str]
+    staged_freeze_until_epoch: int
 
 
 class Trainer:
@@ -142,8 +144,95 @@ class Trainer:
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser):
-        """Reserved for future development of another Trainer"""
-        pass
+        group = parser.add_argument_group(description="Staged parameter freezing")
+        group.add_argument(
+            "--staged_freeze_param",
+            action="append",
+            default=[],
+            help=(
+                "Parameter-name prefix to freeze through "
+                "--staged_freeze_until_epoch. This differs from --freeze_param "
+                "because the parameter is registered with the optimizer and DDP "
+                "before it is temporarily frozen. This option may be repeated."
+            ),
+        )
+        group.add_argument(
+            "--staged_freeze_until_epoch",
+            type=int,
+            default=0,
+            help=(
+                "Freeze --staged_freeze_param through this epoch, then unfreeze "
+                "it at the beginning of the next epoch. Zero disables staged "
+                "freezing."
+            ),
+        )
+
+    @staticmethod
+    def _parameter_matches_prefix(name: str, prefix: str) -> bool:
+        return name == prefix or name.startswith(prefix + ".")
+
+    @classmethod
+    def _validate_staged_freeze_options(
+        cls, model: torch.nn.Module, options: TrainerOptions
+    ) -> None:
+        if options.staged_freeze_until_epoch < 0:
+            raise ValueError(
+                "staged_freeze_until_epoch must be non-negative: "
+                f"{options.staged_freeze_until_epoch}"
+            )
+        parameter_names = tuple(name for name, _ in model.named_parameters())
+        for prefix in options.staged_freeze_param:
+            if not any(
+                cls._parameter_matches_prefix(name, prefix) for name in parameter_names
+            ):
+                raise ValueError(
+                    f"staged_freeze_param does not match any parameter: {prefix}"
+                )
+
+    @classmethod
+    def _set_staged_freeze_state(
+        cls,
+        model: torch.nn.Module,
+        epoch: int,
+        options: TrainerOptions,
+    ) -> Tuple[int, int]:
+        """Freeze staged parameters through the configured warm-up epoch.
+
+        The optimizer and DDP wrapper are constructed while these parameters are
+        still trainable. Toggling them here therefore preserves one continuous
+        optimizer/scheduler state and keeps the parameters known to DDP. Parameters
+        that were already permanently frozen are never unfrozen by this schedule.
+        """
+        freeze = (
+            options.staged_freeze_until_epoch > 0
+            and epoch <= options.staged_freeze_until_epoch
+        )
+        initial_state_name = "_espnet_staged_freeze_initial_requires_grad"
+        initial_requires_grad = getattr(model, initial_state_name, None)
+        if initial_requires_grad is None:
+            initial_requires_grad = {
+                name: parameter.requires_grad
+                for name, parameter in model.named_parameters()
+                if any(
+                    cls._parameter_matches_prefix(name, prefix)
+                    for prefix in options.staged_freeze_param
+                )
+            }
+            setattr(model, initial_state_name, initial_requires_grad)
+
+        matched = 0
+        changed = 0
+        for name, parameter in model.named_parameters():
+            if any(
+                cls._parameter_matches_prefix(name, prefix)
+                for prefix in options.staged_freeze_param
+            ):
+                matched += 1
+                requires_grad = initial_requires_grad[name] and not freeze
+                if parameter.requires_grad != requires_grad:
+                    parameter.requires_grad_(requires_grad)
+                    changed += 1
+        return matched, changed
 
     @staticmethod
     def resume(
@@ -249,6 +338,8 @@ class Trainer:
                 f"The training has already reached at max_epoch: {start_epoch}"
             )
 
+        cls._validate_staged_freeze_options(model, trainer_options)
+
         if distributed_option.distributed:
             if trainer_options.sharded_ddp:
                 dp_model = fairscale.nn.data_parallel.ShardedDataParallel(
@@ -335,6 +426,28 @@ class Trainer:
             else:
                 logging.info(f"{iepoch}/{trainer_options.max_epoch}epoch started")
             set_all_random_seed(trainer_options.seed + iepoch)
+
+            matched, changed = cls._set_staged_freeze_state(
+                model, iepoch, trainer_options
+            )
+            if matched > 0 and (
+                iepoch == start_epoch
+                or iepoch == trainer_options.staged_freeze_until_epoch + 1
+            ):
+                state = (
+                    "frozen"
+                    if iepoch <= trainer_options.staged_freeze_until_epoch
+                    else "trainable"
+                )
+                logging.info(
+                    "Staged parameters are %s at epoch %d: prefixes=%s, "
+                    "matched=%d, changed=%d",
+                    state,
+                    iepoch,
+                    list(trainer_options.staged_freeze_param),
+                    matched,
+                    changed,
+                )
 
             reporter.set_epoch(iepoch)
             # 1. Train and validation for one-epoch

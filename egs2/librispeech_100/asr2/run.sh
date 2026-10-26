@@ -6,7 +6,7 @@ set -u
 set -o pipefail
 
 
-kmeans_feature="wavlm_large/21"  # use model_type/layer_index
+kmeans_feature="hubert_asr/24"  # use model_type/layer_index
 nclusters=2000
 
 src_lang=$(echo "${kmeans_feature}_km${nclusters}" | tr "/" "_")

@@ -77,6 +77,7 @@ requirements = {
         "sacrebleu>=1.5.1",
         "praatio>=6,<7",  # for librispeech phoneme alignment
         "scikit-learn>=1.0.0",  # for HuBERT kmeans
+        "POT>=0.9.7,<0.10",  # for differentiable optimal transport
     ],
     # all: The modules should be optionally installled due to some reason.
     #      Please consider moving them to "install" occasionally
@@ -97,6 +98,7 @@ requirements = {
         "pytest-timeouts>=1.2.1",
         "pytest-pythonpath>=0.7.3",
         "pytest-cov>=2.7.1",
+        "POT>=0.9.7,<0.10",
         "hacking>=2.0.0",
         "mock>=2.0.0",
         "pycodestyle",

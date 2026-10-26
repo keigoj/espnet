@@ -7,6 +7,7 @@ from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
 from espnet2.asr.frontend.cnn import CNNFrontend
 from espnet2.asr.preencoder.linear import LinearProjection
 from espnet2.ssl.espnet_model import ESPnetSSLModel
+from espnet2.ssl.loss.gumbel_kmeans import GumbelKMeansLoss
 from espnet2.ssl.loss.hubert import HuBERTLoss
 from espnet2.tasks.ssl import util_choices
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
@@ -160,3 +161,39 @@ def test_masking():
     # masking changes B,T,D to BT, D
     assert encoded[mask_m].size(0) <= encoded.size(0) * encoded.size(1)
     assert encoded[mask_u].size(0) <= encoded.size(0) * encoded.size(1)
+
+
+def test_encode_gumbel_kmeans_units():
+    frontend = CNNFrontend("group_norm", "standard", True, [(3, 3, 2)])
+    preencoder = LinearProjection(3, 16)
+    encoder = TransformerEncoder(
+        16,
+        output_size=16,
+        attention_heads=1,
+        linear_units=4,
+        num_blocks=2,
+        pos_enc_layer_type="conv",
+        input_layer="wav2vec",
+    )
+    losses = [GumbelKMeansLoss(16, num_clusters=3)]
+    model = ESPnetSSLModel(
+        frontend=frontend,
+        specaug=None,
+        normalize=None,
+        preencoder=preencoder,
+        encoder=encoder,
+        losses=losses,
+        util_attributes=set(),
+        required_inputs={"encoder_output", "encoder_output_lengths"},
+        util_modules=torch.nn.ModuleDict(),
+        token_list=["0", "1", "2"],
+    )
+    model.eval()
+
+    speech = torch.randn(2, 32)
+    speech_lengths = torch.tensor([32, 24], dtype=torch.long)
+    units, unit_lengths = model.encode_units(speech, speech_lengths)
+
+    assert units.size(0) == 2
+    assert torch.equal(unit_lengths, torch.tensor([15, 11]))
+    assert units[1, unit_lengths[1] :].eq(-1).all()

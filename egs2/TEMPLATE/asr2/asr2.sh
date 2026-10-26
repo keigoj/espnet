@@ -76,6 +76,7 @@ codec_checkpoint_path=      # path to codec checkpoint file
 codec_config_path=          # path to codec config file
 kmeans_method=base          # base / phone-based / anchore-based
 lambda_anchor=
+anchor_mode=cluster         # cluster / frame (anchore-based only)
 
 # Tokenization related
 tokenization_choice=ssl # ssl or codec
@@ -222,6 +223,7 @@ Options:
     --hubert_asr_extra_conf # Optional S3PRL extra_conf for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_extra_conf}").
     --hubert_asr_normalize # S3PRL normalize setting for kmeans_feature=hubert_asr/<layer> (default="${hubert_asr_normalize}").
     --lambda_anchor    # Anchor regularization weight for phone/anchor-based kmeans. Empty means no lambda tag/pass-through (default="${lambda_anchor}").
+    --anchor_mode      # Anchor assignment unit for anchor-based kmeans: cluster or frame (default="${anchor_mode}").
 
     # Tokenization related
     --oov                     # Out of vocabulary symbol (default="${oov}").
@@ -509,10 +511,19 @@ if { [ "${kmeans_method}" = "phone-based" ] || [ "${kmeans_method}" = "anchore-b
     lambda_tag="_lam${lambda_anchor//./p}"
 fi
 
+anchor_mode_tag=
+if [ "${kmeans_method}" = "anchore-based" ]; then
+    case "${anchor_mode}" in
+        cluster|frame) ;;
+        *) log "Error: --anchor_mode must be 'cluster' or 'frame': ${anchor_mode}"; exit 2 ;;
+    esac
+    anchor_mode_tag="_${anchor_mode}"
+fi
+
 if [ -n "${lambda_tag}" ]; then
-    km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}${lambda_tag}_${nclusters}clusters
+    km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}${anchor_mode_tag}${lambda_tag}_${nclusters}clusters
 else
-    km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}_${nclusters}clusters
+    km_dir="${expdir}"/kmeans/$(echo "${kmeans_feature}" | tr "/" "_")_${kmeans_method}${anchor_mode_tag}_${nclusters}clusters
 fi
 
 # Set tag for naming of model directory
@@ -546,7 +557,7 @@ if [ -z "${asr_tag}" ]; then
         asr_tag+="_sp"
     fi
     if [ -n "${kmeans_method}" ]; then
-        asr_tag+="_km_${kmeans_method}"
+        asr_tag+="_km_${kmeans_method}${anchor_mode_tag}"
     fi
     if [ -n "${lambda_tag}" ]; then
         asr_tag+="${lambda_tag}"
@@ -846,6 +857,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
             --cpu_cmd "${train_cmd}" \
             --cuda_cmd "${cuda_cmd}" \
             --kmeans_method "${kmeans_method}" \
+            --anchor_mode "${anchor_mode}" \
             ${lambda_anchor:+--lambda_anchor "${lambda_anchor}"} \
             ${kmeans_opts}
 
@@ -866,7 +878,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] && ! [[ " ${skip_stages} " =~ [
         fi
         pseudo_label_name="pseudo_labels_km${nclusters}.txt"
         if [ -n "${kmeans_method}" ]; then
-            pseudo_label_name="pseudo_labels_${kmeans_method}${lambda_tag}_km${nclusters}.txt"
+            pseudo_label_name="pseudo_labels_${kmeans_method}${anchor_mode_tag}${lambda_tag}_km${nclusters}.txt"
         fi
 
         if [ "${src_case}" = ts ]; then

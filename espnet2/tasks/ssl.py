@@ -16,10 +16,12 @@ from typeguard import typechecked
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.e_branchformer_encoder import EBranchformerEncoder
+from espnet2.asr.encoder.identity_encoder import IdentityEncoder
 from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.cnn import CNNFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
+from espnet2.asr.frontend.s3prl import S3prlFrontend
 from espnet2.asr.preencoder.abs_preencoder import AbsPreEncoder
 from espnet2.asr.preencoder.linear import LinearProjection
 from espnet2.asr.preencoder.sinc import LightweightSincConvs
@@ -30,6 +32,7 @@ from espnet2.layers.global_mvn import GlobalMVN
 from espnet2.layers.utterance_mvn import UtteranceMVN
 from espnet2.ssl.espnet_model import ESPnetSSLModel
 from espnet2.ssl.loss.abs_loss import AbsSSLLoss
+from espnet2.ssl.loss.gumbel_kmeans import GumbelKMeansLoss
 from espnet2.ssl.loss.hubert import HuBERTLoss
 from espnet2.ssl.utils.mask import Masking
 from espnet2.tasks.abs_task import AbsTask
@@ -45,7 +48,11 @@ from espnet2.utils.types import float_or_none, int_or_none, str2bool, str_or_non
 
 frontend_choices = ClassChoices(
     name="frontend",
-    classes=dict(wav2vec_cnn=CNNFrontend, default=DefaultFrontend),
+    classes=dict(
+        wav2vec_cnn=CNNFrontend,
+        default=DefaultFrontend,
+        s3prl=S3prlFrontend,
+    ),
     type_check=AbsFrontend,
     default="wav2vec_cnn",
 )
@@ -79,13 +86,17 @@ encoder_choices = ClassChoices(
         transformer=TransformerEncoder,
         e_branchformer=EBranchformerEncoder,
         conformer=ConformerEncoder,
+        identity=IdentityEncoder,
     ),
     type_check=AbsEncoder,
     default="transformer",
 )
 loss_choices = ClassChoices(
     "loss",
-    classes=dict(hubert=HuBERTLoss),
+    classes=dict(
+        hubert=HuBERTLoss,
+        gumbel_kmeans=GumbelKMeansLoss,
+    ),
     type_check=AbsSSLLoss,
     default="hubert",
 )
@@ -295,11 +306,12 @@ class SSLTask(AbsTask):
 
     @classmethod
     @typechecked
-    def build_collate_fn(cls, args: argparse.Namespace, train: bool) -> Callable[
+    def build_collate_fn(
+        cls, args: argparse.Namespace, train: bool
+    ) -> Callable[
         [Collection[Tuple[str, Dict[str, np.ndarray]]]],
         Tuple[List[str], Dict[str, torch.Tensor]],
     ]:
-
         # default sampling rate is 16000
         fs = args.frontend_conf.get("fs", 16000)
         if isinstance(fs, str):

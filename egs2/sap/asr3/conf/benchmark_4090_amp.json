@@ -1,0 +1,24 @@
+{
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "torch": "2.6.0+cu118",
+  "batch_bins": 1600000,
+  "accum_grad": 9,
+  "frontend_amp": true,
+  "fused_adamw": true,
+  "allocator_config": "expandable_segments:True",
+  "measured_batches": 160,
+  "stress_batches": 24,
+  "measured_utterances": 1862,
+  "batches_per_epoch": 43829,
+  "mean_batch_size": 11.40375094115768,
+  "seconds_per_batch": 0.18561290121870117,
+  "utterances_per_second": 62.69768924245165,
+  "projected_train_minutes": 135.58713079190755,
+  "peak_allocated_GiB": 21.220666885375977,
+  "peak_reserved_GiB": 23.056640625,
+  "loss_range": [
+    12.664737701416016,
+    884.5712890625
+  ],
+  "all_losses_and_update_gradients_finite": true
+}

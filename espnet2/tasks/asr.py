@@ -61,6 +61,7 @@ from espnet2.asr.frontend.huggingface import HuggingFaceFrontend
 from espnet2.asr.frontend.s3prl import S3prlFrontend
 from espnet2.asr.frontend.whisper import WhisperFrontend
 from espnet2.asr.frontend.windowing import SlidingWindow
+from espnet2.asr.gumbel_kmeans_asr_model import ESPnetGumbelKMeansASRModel
 from espnet2.asr.maskctc_model import MaskCTCModel
 from espnet2.asr.pit_espnet_model import ESPnetASRModel as PITESPnetModel
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
@@ -131,6 +132,7 @@ model_choices = ClassChoices(
     "model",
     classes=dict(
         espnet=ESPnetASRModel,
+        gumbel_kmeans=ESPnetGumbelKMeansASRModel,
         maskctc=MaskCTCModel,
         pit_espnet=PITESPnetModel,
     ),

@@ -8,19 +8,26 @@ set -o pipefail
 
 kmeans_feature="wavlm_large/21"  # use model_type/layer_index eg. hubert_asr/12, wavlm_large/21
 nclusters=2000
-kmeans_method="anchore-based" # base / phone-based / anchore-based
-lambda_anchor=1000
-anchor_center_path="../../librispeech_100/asr2/exp/kmeans/wavlm_large_21_base_2000clusters/km_2000.npy"
+kmeans_method="base" # base / phone-based / anchore-based
+lambda_anchor=0.0
+anchor_mode="frame" # cluster / frame
+anchor_center_path="../../librispeech_100/asr2/exp/kmeans/hubert_asr_24_base_2000clusters/km_2000.npy"
 
 lambda_tag=
 if [ -n "${lambda_anchor}" ]; then
     lambda_tag="_lam${lambda_anchor//./p}"
 fi
 
-src_lang=$(echo "${kmeans_feature}_${kmeans_method}${lambda_tag}_km${nclusters}" | tr "/" "_")
+anchor_mode_tag=
+if [ "${kmeans_method}" = "anchore-based" ]; then
+    anchor_mode_tag="_${anchor_mode}"
+fi
+
+src_lang=$(echo "${kmeans_feature}_${kmeans_method}${anchor_mode_tag}${lambda_tag}_km${nclusters}" | tr "/" "_")
 tgt_lang=en
 
-asr_tag="${src_lang}_${tgt_lang}"
+# asr_tag="${src_lang}_${tgt_lang}"
+asr_tag="${src_lang}_ts_char_${tgt_lang}"
 
 train_set="train"
 train_dev="dev"
@@ -34,11 +41,11 @@ tgt_nbpe=5000   # if token_joint is True, then only tgt_nbpe is used
 
 # ts: true sequence
 # rm: deduplicated sequence which removes duplicated tokens
-src_case="rm"
+src_case="ts"
 tgt_case="ts"
 
 ./asr2.sh \
-    --kmeans_opts "--batch_bins 3200000 --nj 4 --stage 2 --stop-stage 5 \
+    --kmeans_opts "--batch_bins 3200000 --nj 4 --stage 3 --stop-stage 5 \
                     --label_rspecifier data/phoneme_alignment/train.utt2phones \
                     --anchor_center_path ${anchor_center_path}" \
     --kmeans_feature "${kmeans_feature}" \
@@ -46,7 +53,7 @@ tgt_case="ts"
     --ngpu 1 \
     --src_lang ${src_lang} \
     --tgt_lang ${tgt_lang} \
-    --src_token_type "bpe" \
+    --src_token_type "char" \
     --src_nbpe $src_nbpe \
     --tgt_token_type "bpe" \
     --tgt_nbpe $tgt_nbpe \
@@ -63,7 +70,8 @@ tgt_case="ts"
     --tgt_bpe_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --lm_train_text "dump/raw/${train_set}_sp/text.${tgt_case}.${tgt_lang}" \
     --portion 0.05 \
-    --gpu_inference false \
+    --gpu_inference true \
     --kmeans_method "${kmeans_method}" \
+    --anchor_mode "${anchor_mode}" \
     --asr_tag "${asr_tag}" \
     ${lambda_anchor:+--lambda_anchor "${lambda_anchor}"} "$@"

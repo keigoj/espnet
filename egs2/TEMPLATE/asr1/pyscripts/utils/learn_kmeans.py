@@ -518,6 +518,15 @@ class BatchedAnchoredKMeans(AnchoredKMeans):
     def _assign(self, X: np.ndarray, centers: np.ndarray):
         return _assign_batched(X, centers, self.assign_batch_size)
 
+    def _frame_to_anchor_index(
+        self, X: np.ndarray, anchor: np.ndarray
+    ) -> np.ndarray:
+        """Choose the nearest anchor using batched matrix multiplication."""
+        if X.shape[0] == 0:
+            return np.empty((0,), dtype=np.int64)
+        nearest, _ = _assign_batched(X, anchor, self.assign_batch_size)
+        return nearest
+
 
 def get_km_model(
     n_clusters,

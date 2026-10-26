@@ -69,6 +69,7 @@ class UASRTrainer(Trainer):
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser):
         """Add additional arguments for GAN-trainer."""
+        super().add_arguments(parser)
         parser.add_argument(
             "--generator_first",
             type=str2bool,

@@ -1,0 +1,68 @@
+{
+  "utterance_ids": [
+    "02005a84-8847-4ef7-7b99-08dc286c108f_1052_3462",
+    "0539d504-1dee-4c09-e989-08dc2e961576_1052_4862",
+    "08626c89-3dbd-4756-488d-08db66e486e4_10348_1077",
+    "0a71bb2c-5579-468f-3729-08dc13d38337_1052_4303",
+    "0f9ac13f-e103-4926-a1a8-08dc11dcc589_101_3077",
+    "108bae54-13c5-4f33-769b-08dc54a70eeb_1055_4768",
+    "11a9ea43-641f-49d1-a1b5-08dc11dcc589_2225_2940_sent002",
+    "15dec664-dc2b-4a05-4a54-08dc3c7b3134_1052_4272",
+    "17073b31-5882-4a6f-680c-08db4cce187f_101_868",
+    "199e75a8-422f-473f-2b40-08db46c00613_10463_753_sent001",
+    "19afb5a2-41dc-42a1-1f5b-08db743c9986_101_1961",
+    "284d7944-ac8e-47bb-1f66-08db3dcbbd09_10491_525",
+    "2866a69c-4e37-439c-60b9-08db37b72f34_10001_334",
+    "361d90cd-e838-451e-c58f-08dc27c1bd26_1052_3349",
+    "3e9ab29f-daf0-4a3c-a181-08dc11dcc589_101_2741",
+    "4ede54a7-2133-4ef2-1161-08db2577509f_10195_445"
+  ],
+  "speakers": 16,
+  "total_seconds": 73.1115625,
+  "note": "16 short dev utterances from distinct speakers, individual FP32 frontend forwards; descriptive diagnostic, not WER evaluation",
+  "initial": {
+    "frames": 3661,
+    "hard_active_clusters": 850,
+    "hard_marginal_perplexity": 616.552978515625,
+    "top_cluster_fraction": 0.011745424941182137,
+    "median_top2_squared_distance_gap": 4927.625,
+    "scales": {
+      "0.0009765625": {
+        "expected_gumbel_nearest_agreement": 0.900076687335968,
+        "mean_frame_perplexity": 1.4067274332046509
+      },
+      "0.03125": {
+        "expected_gumbel_nearest_agreement": 0.9973511695861816,
+        "mean_frame_perplexity": 1.0082939863204956
+      },
+      "1.0": {
+        "expected_gumbel_nearest_agreement": 0.9998448491096497,
+        "mean_frame_perplexity": 1.0003587007522583
+      }
+    }
+  },
+  "epoch18": {
+    "frames": 3661,
+    "hard_active_clusters": 163,
+    "hard_marginal_perplexity": 31.198129653930664,
+    "top_cluster_fraction": 0.23436219990253448,
+    "median_top2_squared_distance_gap": 4255.203125,
+    "scales": {
+      "0.0009765625": {
+        "expected_gumbel_nearest_agreement": 0.8677093982696533,
+        "mean_frame_perplexity": 1.6672959327697754
+      },
+      "0.03125": {
+        "expected_gumbel_nearest_agreement": 0.9964166879653931,
+        "mean_frame_perplexity": 1.0112199783325195
+      },
+      "1.0": {
+        "expected_gumbel_nearest_agreement": 0.999951183795929,
+        "mean_frame_perplexity": 1.0001909732818604
+      }
+    }
+  },
+  "codebook_rms_change": 0.02032518945634365,
+  "codebook_initial_rms": 10.785813331604004,
+  "quantizer_num_forward_updates_epoch18": 1003360
+}

@@ -294,3 +294,34 @@ class ESPnetSSLModel(AbsESPnetModel):
         )
 
         return speech[0], speech[1], speech_lengths
+
+    @torch.no_grad()
+    def encode_units(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        loss_index: int = 0,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Extract hard units from a configured Gumbel K-means SSL loss.
+
+        ``loss_index`` refers to the index among Gumbel K-means losses rather
+        than the index in the complete SSL loss list.  This keeps extraction
+        stable when another SSL objective (for example HuBERT) precedes it.
+        """
+        quantizer_losses = [
+            loss_func
+            for loss_func in self.losses
+            if hasattr(loss_func, "extract_units")
+        ]
+        if not 0 <= loss_index < len(quantizer_losses):
+            raise ValueError(
+                f"Gumbel K-means loss index {loss_index} is unavailable; "
+                f"the model has {len(quantizer_losses)} quantizer loss(es)"
+            )
+
+        final_output, layer_outputs, output_lengths = self.inference_encode(
+            speech, speech_lengths, use_mask=False
+        )
+        return quantizer_losses[loss_index].extract_units(
+            final_output, layer_outputs, output_lengths
+        )

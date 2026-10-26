@@ -1,0 +1,85 @@
+# Jointly fine-tune WavLM layer 21 and a differentiable Gumbel K-means tokenizer.
+# The codebook stays in WavLM's 1024-dimensional space so it can be aligned with
+# fixed healthy-speech centroids using a uniform-mass Sinkhorn divergence.
+use_amp: true
+grad_clip: 5.0
+batch_type: numel
+batch_bins: 800000  # Conservative default because WavLM is not frozen.
+num_workers: 4
+accum_grad: 16
+max_epoch: 10
+patience: none
+init: none
+# Freeze WavLM's waveform CNN while fine-tuning its Transformer and codebook.
+freeze_param:
+- frontend.upstream.upstream.model.feature_extractor
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+
+collate_fn_conf:
+    pad: false
+    rand_crop: true
+    crop_audio: true
+
+frontend: s3prl
+frontend_conf:
+    fs: 16k
+    frontend_conf:
+        upstream: wavlm_large
+        normalize: false
+    download_dir: ckpt
+    multilayer_feature: false
+    layer: 21
+
+specaug: null
+normalize: null
+
+preencoder: null
+encoder: identity
+encoder_conf: {}
+
+loss:
+-   name: gumbel_kmeans
+    conf:
+        num_clusters: 2000
+        layer: -1
+        kmeans_weight: 0.1
+        commitment_weight: 0.0  # Disabled for the initial K-means + OT baseline.
+        diversity_weight: 0.5
+        variance_weight: 10.0
+        ot_weight: 0.0
+        variance_target: 1.0
+        temperature: 2.0
+        min_temperature: 0.5
+        temperature_decay: 0.999995
+        hard: true
+        normalize_inputs: false
+        # Scale raw 1024-dimensional squared Euclidean distances before Gumbel noise.
+        logit_scale: 0.0009765625  # 1 / encoder_output_size
+        # Initialize the trainable codebook from SAP train-set K-means.
+        initial_centroid_path: ../asr2/exp/kmeans/wavlm_large_21_base_2000clusters/km_2000.npy
+        # Keep healthy-speech centroids separate for optional OT regularization.
+        reference_centroid_path: ../../librispeech_100/asr2/exp/kmeans/wavlm_large_21_base_2000clusters/km_2000.npy
+        initialize_from_reference: false
+        ot_epsilon: 1.0
+        ot_iterations: 20
+        ot_mass_mode: uniform  # Placeholder for future cluster-frequency masses.
+
+util: []
+model_conf:
+    extract_feats_in_collect_stats: false
+
+optim: adam
+optim_conf:
+    lr: 0.00005
+    weight_decay: 0.000001
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 1000
+
+log_interval: 100
+cudnn_deterministic: false
+cudnn_benchmark: false

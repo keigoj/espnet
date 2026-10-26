@@ -411,6 +411,11 @@ class ESPnetASRModel(AbsESPnetModel):
             if self.normalize is not None:
                 feats, feats_lengths = self.normalize(feats, feats_lengths)
 
+        # Inference may enable AMP only for the frontend. Restore the input
+        # dtype before the encoder, which runs outside that autocast region.
+        if self.autocast_frontend and not torch.is_autocast_enabled():
+            feats = feats.to(dtype=speech.dtype)
+
         # Pre-encoder, e.g. used for raw input data
         if self.preencoder is not None:
             feats, feats_lengths = self.preencoder(feats, feats_lengths)

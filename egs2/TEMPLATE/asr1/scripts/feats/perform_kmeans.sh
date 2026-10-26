@@ -76,6 +76,15 @@ if { [ "${kmeans_method}" = "phone-based" ] || [ "${kmeans_method}" = "anchore-b
     lambda_tag="_lam${lambda_anchor//./p}"
 fi
 
+anchor_mode_tag=
+if [ "${kmeans_method}" = "anchore-based" ]; then
+    case "${anchor_mode}" in
+        cluster|frame) ;;
+        *) log "Error: --anchor_mode must be 'cluster' or 'frame': ${anchor_mode}"; exit 2 ;;
+    esac
+    anchor_mode_tag="_${anchor_mode}"
+fi
+
 if [ $# -ne 0 ]; then
     echo "Usage: $0 <--nclusters:100> <--feature_type:mfcc>"
     exit 0
@@ -414,7 +423,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && ! [[ " ${skip_stages} " =~ [
             fi
             out_tail_="${tail_}"
             if [ -n "${kmeans_method}" ]; then
-                out_tail_="${kmeans_method}${lambda_tag}_${tail_}"
+                out_tail_="${kmeans_method}${anchor_mode_tag}${lambda_tag}_${tail_}"
             fi
             for n in $(seq ${_nj}); do
                 cat "${_dump_dir}"/logdir/pseudo_labels_${tail_}.${n}.txt || exit 1;
@@ -427,7 +436,7 @@ fi
 km_tag=$(basename ${km_dir})
 pseudo_label_name="pseudo_labels_km${nclusters}.txt"
 if [ -n "${kmeans_method}" ]; then
-    pseudo_label_name="pseudo_labels_${kmeans_method}${lambda_tag}_km${nclusters}.txt"
+    pseudo_label_name="pseudo_labels_${kmeans_method}${anchor_mode_tag}${lambda_tag}_km${nclusters}.txt"
 fi
 
 if [ -n "${alignment_phoneme_dir}" ]; then
