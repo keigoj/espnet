@@ -1,3 +1,5 @@
+リポジトリのドキュメントと既存のコードに矛盾がある場合は、既存のコードで採用されている規約に従い、最終的な返答においてドキュメントとコードの間で見つけた不一致を一つずつ指摘してください。
+
 # プロジェクト概要
 - 本リポジトリは、ESPnetをベースとした音声認識（ASR）の研究用コードです。
 - 離散音声トークンを用いた障害者音声認識の研究のために使います。
@@ -17,3 +19,14 @@
 - 変更したファイルと内容を簡潔に説明すること。
 - テスト結果を報告すること。
 - 回答は原則として日本語で行うこと。
+
+# 参考論文
+
+微分可能なクラスタリング、SSLとK-meansの共同最適化、構音障害音声認識に関する調査・実装・設定比較では、必要に応じて以下の保存済み論文を参照すること。論文の実験条件と本リポジトリの実装・設定を区別し、対応関係や相違点は該当する節・式・表を確認して説明すること。
+
+- **微分可能なクラスタリングによるASRの元論文**: Kentaro Onda et al., "Differentiable K-means for Fully-optimized Discrete Token-based ASR" (2025), arXiv:2505.16207v1。
+  保存先: [doc/references/2505.16207.pdf](doc/references/2505.16207.pdf)。取得元: https://arxiv.org/pdf/2505.16207 。微分可能K-means、ASR損失による共同最適化、単一層・複数層の学習スケジュールを確認する際に参照する。
+- **構音障害音声認識への応用論文**: Huimeng Wang et al., "Differentiable and Severity-invariant Discrete Tokens for Dysarthric Speech Recognition" (2026), arXiv:2609.16855v1。
+  保存先: [doc/references/2609.16855.pdf](doc/references/2609.16855.pdf)。取得元: https://arxiv.org/pdf/2609.16855 。構音障害音声認識への適用、重症度不変正則化（SIR）、UASpeech・TORGOでの実験条件を確認する際に参照する。
+
+PDFは2026-10-26に取得した。本文の検索には、例えば `pdftotext -layout doc/references/2505.16207.pdf -` を使用できる。
