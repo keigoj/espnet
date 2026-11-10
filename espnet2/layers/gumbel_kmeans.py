@@ -216,19 +216,29 @@ class GumbelKMeans(torch.nn.Module):
         # Squared Euclidean distance without materializing (x - c) for every
         # cluster.  Disable autocast as well as casting the inputs: otherwise
         # matmul is downcast again and cancellation can erase nearby distances.
+        # Shapes: B = utterances in the batch, T = padded frames,
+        # D = feature dim, K = clusters.  Padded frames are not excluded here;
+        # forward() masks them after the assignment.
         with torch.autocast(device_type=inputs.device.type, enabled=False):
-            inputs_float = inputs.float()
-            codebook_float = self.codebook.float()
+            inputs_float = inputs.float()  # (B, T, D)
+            codebook_float = self.codebook.float()  # (K, D)
             if self.normalize_inputs:
+                # L2-normalize along D; shapes are unchanged.
                 inputs_float = F.normalize(inputs_float, dim=-1)
                 codebook_float = F.normalize(codebook_float, dim=-1)
+            # ||x||^2 summed over D: (B, T, D) -> (B, T, 1).  keepdim keeps the
+            # cluster axis free so it broadcasts against (K,) below.
             input_norm = inputs_float.square().sum(dim=-1, keepdim=True)
+            # ||c||^2 summed over D: (K, D) -> (K,).
             center_norm = codebook_float.square().sum(dim=-1)
+            # x^T c: (B, T, D) @ (D, K) -> (B, T, K).  The sum broadcasts
+            # (B, T, 1) + (K,) + (B, T, K) -> (B, T, K).
             distances = (
                 input_norm
                 + center_norm
                 - 2.0 * torch.matmul(inputs_float, codebook_float.transpose(0, 1))
             )
+            # Remove small negative values from rounding; (B, T, K).
             return distances.clamp_min_(0.0)
 
     def _valid_mask(
