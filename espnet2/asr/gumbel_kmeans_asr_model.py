@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -9,6 +10,7 @@ from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.espnet_model import ESPnetASRModel, autocast, autocast_type
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
+from espnet2.asr.frontend.token_embedding import TokenEmbedding
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
 from espnet2.asr.preencoder.abs_preencoder import AbsPreEncoder
 from espnet2.asr.specaug.abs_specaug import AbsSpecAug
@@ -141,6 +143,10 @@ class ESPnetGumbelKMeansASRModel(ESPnetASRModel):
             self._last_quantizer_output = output
         return output.quantized, feats_lengths
 
+    def _quantizer_sampling(self) -> Optional[bool]:
+        """Sampling policy shared with the stop-gradient SIR reference branch."""
+        return self.quantizer_sample_gumbel
+
     def _cluster_loss(
         self, output: GumbelKMeansOutput, ot_loss: torch.Tensor
     ) -> torch.Tensor:
@@ -179,7 +185,7 @@ class ESPnetGumbelKMeansASRModel(ESPnetASRModel):
             output = self.quantizer(
                 feats,
                 feats_lengths,
-                sample_gumbel=self.quantizer_sample_gumbel,
+                sample_gumbel=self._quantizer_sampling(),
                 update_temperature=False,
                 return_soft_probabilities=True,
             )
@@ -361,3 +367,51 @@ class ESPnetGumbelKMeansASRModel(ESPnetASRModel):
         feats, feats_lengths = self._extract_frontend_feats(speech, speech_lengths)
         output = self.quantizer(feats, feats_lengths, sample_gumbel=False)
         return output.indices, feats_lengths
+
+
+class ESPnetTokenizedASRModel(ESPnetGumbelKMeansASRModel):
+    """Upstream-style assignments -> independent embedding -> existing ASR.
+
+    Tokenizer freezing uses the recipe's existing staged parameter freeze.
+    SIR and auxiliary objectives are inherited without changing their settings.
+    """
+
+    @typechecked
+    def __init__(self, asr_embedding_conf: Optional[dict] = None, **kwargs):
+        super().__init__(**kwargs)
+        embedding_conf = dict(asr_embedding_conf or {})
+        embedding_conf.pop("input_size", None)
+        self.asr_embedding = TokenEmbedding(
+            input_size=self.quantizer.num_clusters, **embedding_conf
+        )
+
+    @property
+    def tokenizer_frozen(self) -> bool:
+        return not self.quantizer.codebook.requires_grad and (
+            self.frontend is None
+            or not any(p.requires_grad for p in self.frontend.parameters())
+        )
+
+    def _quantizer_sampling(self) -> Optional[bool]:
+        # Frozen warm-up and evaluation use deterministic nearest centroids.
+        if not self.training or self.tokenizer_frozen:
+            return False
+        return self.quantizer_sample_gumbel
+
+    def _extract_feats(
+        self, speech: torch.Tensor, speech_lengths: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # B utterances, T SSL frames, D SSL dimensions, K clusters, E embedding
+        # dimensions. Only the tokenizer is no-grad during frozen warm-up.
+        with torch.no_grad() if self.tokenizer_frozen else nullcontext():
+            feats, lengths = self._extract_frontend_feats(speech, speech_lengths)
+            output = self.quantizer(
+                feats,  # (B, T, D).
+                lengths,  # (B,).
+                sample_gumbel=self._quantizer_sampling(),
+                return_soft_probabilities=self._capture_sir_output,
+            )
+        if self._capture_quantizer_output:
+            self._last_quantizer_output = output
+        # (B, T, K) -> (B, T, E). Embedding learns even while tokenizer is frozen.
+        return self.asr_embedding(output.probabilities, lengths)

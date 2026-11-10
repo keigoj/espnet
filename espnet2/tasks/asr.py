@@ -61,7 +61,10 @@ from espnet2.asr.frontend.huggingface import HuggingFaceFrontend
 from espnet2.asr.frontend.s3prl import S3prlFrontend
 from espnet2.asr.frontend.whisper import WhisperFrontend
 from espnet2.asr.frontend.windowing import SlidingWindow
-from espnet2.asr.gumbel_kmeans_asr_model import ESPnetGumbelKMeansASRModel
+from espnet2.asr.gumbel_kmeans_asr_model import (
+    ESPnetGumbelKMeansASRModel,
+    ESPnetTokenizedASRModel,
+)
 from espnet2.asr.maskctc_model import MaskCTCModel
 from espnet2.asr.pit_espnet_model import ESPnetASRModel as PITESPnetModel
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
@@ -133,6 +136,7 @@ model_choices = ClassChoices(
     classes=dict(
         espnet=ESPnetASRModel,
         gumbel_kmeans=ESPnetGumbelKMeansASRModel,
+        tokenized_asr=ESPnetTokenizedASRModel,
         maskctc=MaskCTCModel,
         pit_espnet=PITESPnetModel,
     ),
@@ -551,6 +555,14 @@ class ASRTask(AbsTask):
             args.frontend_conf = {}
             frontend = None
             input_size = args.input_size
+
+        if getattr(args, "model", None) == "tokenized_asr":
+            # Quantization remains in SSL dimension D. The downstream encoder
+            # receives (B, T, E), with E set by the independent token embedding.
+            # B is the utterance count and T is the SSL frame count.
+            input_size = (args.model_conf.get("asr_embedding_conf") or {}).get(
+                "embed_dim", 512
+            )
 
         # 2. Data augmentation for spectrogram
         if args.specaug is not None:

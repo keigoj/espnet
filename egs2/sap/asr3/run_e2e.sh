@@ -123,8 +123,8 @@ if ! [[ "${max_epoch}" =~ ^[1-9][0-9]*$ ]]; then
     log "Error: --max_epoch must be a positive integer: ${max_epoch}"
     exit 2
 fi
-if [ "${e2e_mode}" != fixed ] && [ "${warmup_epochs}" -ge "${max_epoch}" ]; then
-    log "Error: --warmup_epochs must be smaller than --max_epoch"
+if [ "${e2e_mode}" != fixed ] && [ "${warmup_epochs}" -gt "${max_epoch}" ]; then
+    log "Error: --warmup_epochs must not exceed --max_epoch"
     exit 2
 fi
 
@@ -165,15 +165,15 @@ esac
     exit 1
 }
 
-python3 - "${asr_config}" "${initial_centroid_path}" "${nclusters}" <<'PY'
+asr_model_tag=$(python3 - "${asr_config}" "${initial_centroid_path}" "${nclusters}" <<'PY'
 import sys
 import numpy as np
 import yaml
 
 with open(sys.argv[1], encoding="utf-8") as f:
     config = yaml.safe_load(f)
-if config.get("model") != "gumbel_kmeans":
-    raise ValueError("E2E config must use model: gumbel_kmeans")
+if config.get("model") not in ("gumbel_kmeans", "tokenized_asr"):
+    raise ValueError("E2E config must use model: tokenized_asr or gumbel_kmeans")
 model_conf = config.get("model_conf", {})
 quantizer_conf = model_conf.get("quantizer_conf", {})
 if not isinstance(quantizer_conf, dict):
@@ -205,7 +205,16 @@ if centroids.shape[0] != nclusters:
         f"--nclusters={nclusters}, but {path} contains "
         f"{centroids.shape[0]} centroids"
     )
+if config["model"] == "tokenized_asr":
+    embedding_conf = model_conf.get("asr_embedding_conf") or {}
+    if not isinstance(embedding_conf, dict):
+        raise ValueError("model_conf.asr_embedding_conf must be a mapping")
+    embed_dim = embedding_conf.get("embed_dim", 512)
+    if not isinstance(embed_dim, int) or embed_dim <= 0:
+        raise ValueError("asr_embedding_conf.embed_dim must be a positive integer")
+    print(f"_tokembed{embed_dim}")
 PY
+)
 
 if [ -n "${pretrained_model}" ] && [ ! -f "${pretrained_model%%:*}" ]; then
     log "Error: missing pretrained model: ${pretrained_model%%:*}"
@@ -240,7 +249,7 @@ if [ -z "${asr_exp}" ]; then
     else
         schedule_tag=warmup${warmup_epochs}_ep${max_epoch}
     fi
-    asr_exp=${expdir}/asr_e2e_wavlm_large_l21_gumbel_km${nclusters}_${e2e_mode}_${schedule_tag}_${lang}
+    asr_exp=${expdir}/asr_e2e_wavlm_large_l21_gumbel_km${nclusters}${asr_model_tag}_${e2e_mode}_${schedule_tag}_${lang}
 fi
 
 opts=(

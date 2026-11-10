@@ -50,6 +50,47 @@ def test_optional_data_names(inference):
     assert "sir_pair_mask" in retval
 
 
+def test_tokenized_asr_builds_encoder_for_token_embedding_dimension():
+    """Build with SSL D=6, K=3 clusters and a distinct ASR dimension E=4."""
+    args = ASRTask.get_parser().parse_args(
+        [
+            "--input_size",
+            "6",
+            "--model",
+            "tokenized_asr",
+            "--model_conf",
+            "{ctc_weight: 1.0, kmeans_weight: 0.0, diversity_weight: 0.0, "
+            "quantizer_conf: {input_dim: 6, num_clusters: 3}, "
+            "asr_embedding_conf: {embed_dim: 4, positional_dropout_rate: 0.0}, "
+            "report_cer: false, report_wer: false}",
+            "--encoder",
+            "transformer",
+            "--encoder_conf",
+            "{output_size: 4, attention_heads: 1, linear_units: 4, "
+            "num_blocks: 1, input_layer: linear}",
+            "--decoder",
+            "null",
+            "--normalize",
+            "null",
+            "--specaug",
+            "null",
+        ]
+    )
+    args.token_list = ["<blank>", "<unk>", "a", "i", "<sos/eos>"]
+    model = ASRTask.build_model(args)
+    assert model.quantizer.input_dim == 6
+    assert model.asr_embedding.output_size() == 4
+    loss, _, _ = model(
+        torch.randn(2, 10, 6),
+        torch.tensor([10, 8]),
+        torch.tensor([[2, 3], [3, 2]]),
+        torch.tensor([2, 2]),
+    )
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert model.asr_embedding.embed.weight.grad.abs().sum() > 0
+
+
 @pytest.mark.parametrize("pair_mask", [None, [1, 0], [0, 0]])
 def test_gumbel_kmeans_sir_build_and_paired_training_data(tmp_path, pair_mask):
     tokens = tmp_path / "tokens.txt"

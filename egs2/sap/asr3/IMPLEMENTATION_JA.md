@@ -119,6 +119,9 @@ temperature_decay: 0.999995
 ```
 
 更新回数はbufferとしてチェックポイントに保存されます。
+ここでいう更新回数はoptimizer stepではなくtraining forward数です。上の値は
+共有quantizerの互換デフォルトで、E2E用の現行YAMLはESPnet本体に合わせて
+`min_temperature: 0.1`、`temperature_decay: 0.999995`を指定します。
 
 ### 3.4 損失
 
@@ -461,12 +464,13 @@ templateへのsymlinkです。SAP固有データ準備と既存ASR2処理を重�
 
 ## 7. end-to-end SSL + K-means + ASR実装
 
-`ESPnetGumbelKMeansASRModel`では、次のデータフローを実装しています。
+新規E2E用の`ESPnetTokenizedASRModel`では、次のデータフローを実装しています。
 
 ```text
 waveform
   -> SSL frontend
   -> Gumbel K-means
+  -> independent token embedding (512 dim + positional encoding)
   -> ASR preencoder / encoder
   -> CTC / attention decoder
 ```
@@ -511,7 +515,7 @@ Transformer部分とK-meansを最初からfreezeしない条件は次のよう�
 ```
 
 この場合はepoch 1からWavLM Transformer、codebook、ASRを同時に更新します。既定の
-実験名は`..._full_warmup0_ep90_en`となり、段階的freeze条件とは別管理されます。
+実験名は`..._tokembed512_full_warmup0_ep90_en`となり、段階的freeze条件とは別管理されます。
 
 E2E側のcluster数は`run_e2e.sh --nclusters N`で指定します。この値はASRモデルの
 `quantizer_conf.num_clusters`と既定の実験ディレクトリ名へ反映されます。初期centroidの
@@ -519,7 +523,7 @@ E2E側のcluster数は`run_e2e.sh --nclusters N`で指定します。この値�
 
 ```text
 ../asr2/exp/kmeans/wavlm_large_21_base_Nclusters/km_N.npy
-exp/asr_e2e_wavlm_large_l21_gumbel_kmN_MODE_warmup30_ep90_en/
+exp/asr_e2e_wavlm_large_l21_gumbel_kmN_tokembed512_MODE_warmup30_ep90_en/
 ```
 
 `fixed`だけはwarm-up後のunfreezeがないため、既定名は
@@ -530,10 +534,19 @@ resumeしないよう、warm-up epoch数と総epoch数をディレクトリ名�
 指定する場合は`--asr_exp`を使います。launcherは学習開始前にcentroidの行数と
 `--nclusters`が一致することを検証します。
 
-`fixed`では、parameterのfreezeに加えてGumbel samplingも無効化します。parameterを
-固定するだけでは親ASRモデルのtrain modeによりGumbel noiseが残るためです。
-`quantizer`と`full`では、forwardがhard one-hot、backwardがsoft gradientとなる
-straight-through Gumbel-Softmaxを使います。
+割当を選ぶ場所は、WavLM出力とASR用embeddingの間のquantizer内部です。
+現行E2E YAMLは`model: tokenized_asr`を指定し、WavLMとcodebookが両方
+凍結されている間はno-gradの決定的な最近傍割当を使います。
+`quantizer`と`full`の凍結解除後は、forwardがhard one-hot、backwardがsoft gradientの
+straight-through Gumbel-Softmaxを使います。評価時と`fixed`は最近傍割当です。
+ASR用embeddingはtokenizerと独立しているため、凍結中も学習されます。
+
+旧`model: gumbel_kmeans`クラスは従来どおりcentroid入力とsamplingを維持します。
+新構成は専用クラスで独立embeddingを使い、凍結sampling用の追加フラグを設けません。
+現行YAMLの温度下限0.1と減衰率
+0.999995はリンク先ESPnet実装のデフォルトで、2025年論文の全実験設定との一致を
+主張するものではありません。対応と残る差は
+[UPSTREAM_ALIGNMENT_JA.md](UPSTREAM_ALIGNMENT_JA.md)を参照してください。
 
 また、現在のASR結合モデルにはSSL loss側で使っている`variance_weight`は未接続です。
 初回比較はOndaらと同様にASR lossだけを使い、K-means・commitment・diversity・OTの

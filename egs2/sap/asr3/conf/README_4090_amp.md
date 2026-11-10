@@ -5,26 +5,31 @@ codebookを凍結し、31 epoch目に解除します。温度は凍結中2.0を�
 forwardから減衰します。LRスケジューラはリセットしません。新規実験の実行例は
 [レシピREADME](../README.md)を参照してください。以下の試走・再開記録は、
 凍結なしの旧条件です。その条件を再開する場合は`--warmup_epochs 0`と既存の
-`--asr_exp`を明示してください。
+`--asr_exp`と、その実験の保存済み`config.yaml`を明示してください。
+
+現行E2E YAMLは[ESPnet本体との対応](../UPSTREAM_ALIGNMENT_JA.md)に従い、
+独立512次元embedding、凍結中の決定的割当、温度下限0.1、forwardごとの減衰率
+0.999995を使います。以下の0.999990843068等は旧試走の履歴です。
 
 > 長時間実行での更新：160万binsの設定は2 epoch目にOOMとなりました。
 > 再開には下記の120万bins設定と専用ランチャーを推奨します。
 > 以下の160万binsの測定値は短い試走時の結果です。
 
 `train_e2e_gumbel_kmeans_wavlm_large_4090_amp.yaml` は、RTX 4090
-24 GB / PyTorch 2.6.0+cu118 で試走した設定です。元のYAMLは変更していません。
+24 GB / PyTorch 2.6.0+cu118 で試走した当時の設定です。現在の同名YAMLには
+上記の更新があるため、旧実験の再開には保存済みconfigを使います。
 
 ```bash
 cd /home/hojo/espnet_dsu/egs2/sap/asr3
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True ./run_e2e.sh \
   --stage 11 --stop_stage 11 \
   --ngpu 1 --e2e_mode full --warmup_epochs 0 \
-  --asr_config conf/train_e2e_gumbel_kmeans_wavlm_large_4090_amp.yaml \
+  --asr_config exp/asr_e2e_wavlm_large_l21_gumbel_km2000_full_amp4090_en/config.yaml \
   --asr_exp exp/asr_e2e_wavlm_large_l21_gumbel_km2000_full_amp4090_en
 ```
 
-既存のデータと統計を使う、新規実験用のコマンドです。今回は長時間の本学習は
-開始していません。`PYTORCH_CUDA_ALLOC_CONF` はPython起動前に設定してください。
+上のコマンドは旧実験をその保存済み設定で再開する例です。
+`PYTORCH_CUDA_ALLOC_CONF` はPython起動前に設定してください。
 
 ## 主な設定
 
@@ -103,6 +108,8 @@ WavLMとASRはAMPを使い、距離計算をFP32で維持します。
 cd /home/hojo/espnet_dsu/egs2/sap/asr3
 ./run_e2e_4090_amp.sh \
   --stage 11 --stop_stage 11 \
+  --warmup_epochs 0 \
+  --asr_config exp/asr_e2e_wavlm_large_l21_gumbel_km2000_full_warmup0_ep90_en/config.yaml \
   --asr_exp exp/asr_e2e_wavlm_large_l21_gumbel_km2000_full_warmup0_ep90_en
 ```
 

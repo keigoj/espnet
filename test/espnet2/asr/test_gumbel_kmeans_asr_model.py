@@ -1,4 +1,5 @@
 import copy
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -7,8 +8,12 @@ from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.transformer_decoder import TransformerDecoder
 from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
-from espnet2.asr.gumbel_kmeans_asr_model import ESPnetGumbelKMeansASRModel
+from espnet2.asr.gumbel_kmeans_asr_model import (
+    ESPnetGumbelKMeansASRModel,
+    ESPnetTokenizedASRModel,
+)
 from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
+from espnet2.train.trainer import Trainer
 
 
 class TrainableFrontend(AbsFrontend):
@@ -23,8 +28,91 @@ class TrainableFrontend(AbsFrontend):
         return self.projection(input), input_lengths
 
 
-def _build_sir_model(**kwargs):
-    return ESPnetGumbelKMeansASRModel(
+def test_upstream_embedding_and_sampling_follow_staged_freeze(monkeypatch):
+    """Warm-up learns E=4 embeddings; epoch 31 also trains the D=6 tokenizer."""
+    torch.manual_seed(0)
+    model = ESPnetTokenizedASRModel(
+        vocab_size=5,
+        token_list=["<blank>", "<unk>", "a", "i", "<sos/eos>"],
+        frontend=TrainableFrontend(),
+        specaug=None,
+        normalize=None,
+        preencoder=None,
+        encoder=TransformerEncoder(
+            input_size=4,
+            output_size=4,
+            attention_heads=1,
+            linear_units=4,
+            num_blocks=1,
+            input_layer="linear",
+        ),
+        postencoder=None,
+        decoder=None,
+        ctc=CTC(odim=5, encoder_output_size=4),
+        joint_network=None,
+        quantizer_conf={"num_clusters": 3, "temperature_decay": 0.9},
+        asr_embedding_conf={"embed_dim": 4, "use_positional_encoding": False},
+        kmeans_weight=0.0,
+        diversity_weight=0.0,
+        ctc_weight=1.0,
+        report_cer=False,
+        report_wer=False,
+    ).train()
+    calls = []
+    original = torch.nn.functional.gumbel_softmax
+
+    def sample(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "gumbel_softmax", sample)
+    options = SimpleNamespace(
+        staged_freeze_param=["frontend", "quantizer"], staged_freeze_until_epoch=30
+    )
+    speech = torch.randn(2, 10, 6, requires_grad=True)  # (B=2, T=10, D=6).
+    lengths = torch.tensor([10, 8])  # (B,); last two frames are padding.
+    text = torch.tensor([[2, 3], [3, 2]])  # (B, L=2 target tokens).
+    Trainer._set_staged_freeze_state(model, 30, options)
+    features, feature_lengths = model._extract_feats(speech, lengths)
+    assert features.shape == (2, 10, 4)  # (B, T, E).
+    assert features[1, 8:].eq(0).all()
+    assert features.device == speech.device
+    assert torch.equal(feature_lengths, lengths)
+    repeated, _ = model._extract_feats(speech, lengths)
+    torch.testing.assert_close(features, repeated, rtol=0, atol=0)
+    loss, _, _ = model(speech, lengths, text, torch.tensor([2, 2]))
+    loss.backward()
+    assert not calls
+    assert model.quantizer.num_updates.item() == 0
+    assert model.frontend.projection.weight.grad is None
+    assert model.quantizer.codebook.grad is None
+    assert speech.grad is None
+    assert model.asr_embedding.embed.weight.grad.abs().sum() > 0
+
+    model.zero_grad()
+    Trainer._set_staged_freeze_state(model, 31, options)
+    loss, _, _ = model(speech, lengths, text, torch.tensor([2, 2]))
+    loss.backward()
+    assert len(calls) == 1
+    assert model.quantizer.num_updates.item() == 1
+    for parameter in (
+        model.frontend.projection.weight,
+        model.quantizer.codebook,
+        model.asr_embedding.embed.weight,
+    ):
+        assert parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        assert parameter.grad.abs().sum() > 0
+
+    # Evaluation switches back to deterministic assignment without annealing.
+    model.eval()
+    with torch.no_grad():
+        model._extract_feats(speech, lengths)
+    assert len(calls) == 1
+    assert model.quantizer.num_updates.item() == 1
+
+
+def _build_sir_model(model_class=ESPnetGumbelKMeansASRModel, **kwargs):
+    return model_class(
         vocab_size=5,
         token_list=["<blank>", "<unk>", "a", "i", "<sos/eos>"],
         frontend=TrainableFrontend(),
@@ -51,6 +139,39 @@ def _build_sir_model(**kwargs):
         report_wer=False,
         **kwargs,
     )
+
+
+def test_legacy_centroid_checkpoint_still_loads_strictly():
+    legacy = _build_sir_model()
+    restored = _build_sir_model()
+    restored.load_state_dict(legacy.state_dict(), strict=True)
+    assert not hasattr(restored, "asr_embedding")
+    assert not any(key.startswith("asr_embedding.") for key in legacy.state_dict())
+
+
+def test_sir_with_independent_embedding_keeps_reference_stop_gradient():
+    """SIR uses K-way assignments, independently of the ASR readout."""
+    model = _build_sir_model(
+        sir_weight=0.2,
+        asr_embedding_conf={"embed_dim": 6, "positional_dropout_rate": 0.0},
+        model_class=ESPnetTokenizedASRModel,
+    )
+    speech = torch.randn(2, 10, 6, requires_grad=True)  # (B=2, T=10, D=6).
+    reference = torch.randn(2, 7, 6, requires_grad=True)  # (B, T_reference=7, D).
+    loss, stats, _ = model(
+        speech,
+        torch.tensor([10, 8]),
+        torch.tensor([[2, 3], [3, 2]]),
+        torch.tensor([2, 2]),
+        healthy_speech=reference,
+        healthy_speech_lengths=torch.tensor([7, 5]),
+    )
+    loss.backward()
+    assert torch.isfinite(stats["loss_sir"]).all()
+    assert reference.grad is None
+    assert speech.grad is not None and torch.isfinite(speech.grad).all()
+    assert model.asr_embedding.embed.weight.grad.abs().sum() > 0
+    assert torch.isfinite(model.quantizer.codebook.grad).all()
 
 
 @pytest.mark.parametrize(

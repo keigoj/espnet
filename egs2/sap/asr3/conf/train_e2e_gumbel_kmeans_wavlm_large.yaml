@@ -1,5 +1,5 @@
 # End-to-end SAP ASR:
-# waveform -> WavLM-large layer 21 -> differentiable K-means -> ASR.
+# waveform -> WavLM layer 21 -> K-means assignments -> token embedding -> ASR.
 # run_e2e.sh controls which modules are frozen.  The base loss is ASR-only so
 # the fixed/quantizer/full comparison isolates the effect of task supervision.
 unused_parameters: true
@@ -72,7 +72,7 @@ decoder_conf:
     src_attention_dropout_rate: 0.1
     layer_drop_rate: 0.0
 
-model: gumbel_kmeans
+model: tokenized_asr
 model_conf:
     # Do not build WavLM during collect-stats; raw sample lengths are enough.
     extract_feats_in_collect_stats: false
@@ -84,14 +84,18 @@ model_conf:
     commitment_weight: 0.0
     diversity_weight: 0.0
     ot_weight: 0.0
-    # null: stochastic hard Gumbel assignments in training and deterministic
-    # nearest-centroid assignments in evaluation. run_e2e.sh overrides this
-    # with false in fixed mode.
+    # Match ESPnet tok at 0c7942d1: deterministic frozen warm-up/evaluation,
+    # then hard straight-through Gumbel sampling when the tokenizer is trainable.
     quantizer_sample_gumbel: null
+    asr_embedding_conf:
+        embed_dim: 512
+        use_positional_encoding: true
+        positional_dropout_rate: 0.1
     quantizer_conf:
         num_clusters: 2000
         temperature: 2.0
-        min_temperature: 0.5
+        min_temperature: 0.1
+        # Upstream default: decay per trainable quantizer forward.
         temperature_decay: 0.999995
         hard: true
         normalize_inputs: false
