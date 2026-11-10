@@ -1,8 +1,11 @@
 from argparse import Namespace
 
+import numpy as np
 import pytest
+import torch
 
 from espnet2.tasks.asr import ASRTask
+from espnet2.train.dataset import ESPnetDataset
 
 
 def test_add_arguments():
@@ -43,6 +46,84 @@ def test_optional_data_names(inference):
     retval = ASRTask.optional_data_names(True, inference)
 
     assert "prompt" in retval
+    assert "healthy_speech" in retval
+    assert "sir_pair_mask" in retval
+
+
+@pytest.mark.parametrize("pair_mask", [None, [1, 0], [0, 0]])
+def test_gumbel_kmeans_sir_build_and_paired_training_data(tmp_path, pair_mask):
+    tokens = tmp_path / "tokens.txt"
+    tokens.write_text("<blank>\n<unk>\na\ni\n<sos/eos>\n")
+    data_paths = []
+    for name, lengths in [("speech", [10, 8]), ("healthy_speech", [7, 12])]:
+        scp = tmp_path / f"{name}.scp"
+        lines = []
+        for b, length in enumerate(lengths):
+            path = tmp_path / f"{name}_{b}.npy"
+            np.save(path, np.random.randn(length, 6).astype(np.float32))
+            lines.append(f"utt_{b} {path}\n")
+        scp.write_text("".join(lines))
+        data_paths.extend(["--train_data_path_and_name_and_type", f"{scp},{name},npy"])
+    text = tmp_path / "text_int"
+    text.write_text("utt_0 2 3\nutt_1 3 2\n")
+    data_paths.extend(["--train_data_path_and_name_and_type", f"{text},text,text_int"])
+    if pair_mask is not None:
+        mask_file = tmp_path / "sir_pair_mask"
+        mask_file.write_text(f"utt_0 {pair_mask[0]}\nutt_1 {pair_mask[1]}\n")
+        data_paths.extend(
+            [
+                "--train_data_path_and_name_and_type",
+                f"{mask_file},sir_pair_mask,text_int",
+            ]
+        )
+    args = ASRTask.get_parser().parse_args(
+        [
+            "--token_list",
+            str(tokens),
+            "--input_size",
+            "6",
+            "--model",
+            "gumbel_kmeans",
+            "--model_conf",
+            "{ctc_weight: 1.0, kmeans_weight: 0.0, diversity_weight: 0.0, "
+            "quantizer_conf: {input_dim: 6, num_clusters: 3}, "
+            "report_cer: false, report_wer: false}",
+            "--model_conf",
+            "sir_weight=0.2",
+            "--encoder",
+            "transformer",
+            "--encoder_conf",
+            "{output_size: 4, attention_heads: 1, linear_units: 4, "
+            "num_blocks: 1, input_layer: linear}",
+            "--decoder",
+            "null",
+            "--normalize",
+            "null",
+            "--specaug",
+            "null",
+            *data_paths,
+        ]
+    )
+    dataset = ESPnetDataset(args.train_data_path_and_name_and_type)
+    ASRTask.check_task_requirements(dataset, allow_variable_data_keys=False, train=True)
+    collate = ASRTask.build_collate_fn(args, train=True)
+    keys, batch = collate([dataset["utt_0"], dataset["utt_1"]])
+    assert keys == ["utt_0", "utt_1"]
+    assert batch["speech"].shape == (2, 10, 6)
+    assert batch["healthy_speech"].shape == (2, 12, 6)
+    assert batch["healthy_speech_lengths"].tolist() == [7, 12]
+    if pair_mask is not None:
+        assert batch["sir_pair_mask"].shape == (2, 1)
+        assert batch["sir_pair_mask"].flatten().tolist() == pair_mask
+        assert "sir_pair_mask_lengths" not in batch
+
+    model = ASRTask.build_model(args)
+    assert model.sir_weight == 0.2
+    loss, stats, _ = model(**batch)
+    loss.backward()
+    assert torch.isfinite(stats["loss_sir"]).all()
+    assert stats["sir_num_pairs"].item() == (2 if pair_mask is None else sum(pair_mask))
+    assert model.quantizer.codebook.grad.abs().sum() > 0
 
 
 def get_dummy_namespace():

@@ -7,8 +7,10 @@ use_amp: true
 grad_clip: 5.0
 num_workers: 4
 batch_type: numel
-batch_bins: 2000000
-accum_grad: 16
+# RTX A6000 x4: DDP splits this global budget across the four GPUs.
+# SAP train_sp: approximately 210 utterances per optimizer update.
+batch_bins: 12000000
+accum_grad: 3
 max_epoch: 90
 patience: none
 init: none

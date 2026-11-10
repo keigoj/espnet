@@ -1,5 +1,8 @@
 # SAP ASR3: differentiable discrete-token recipe
 
+For doc-based mild-speaker selection and partially paired SIR training, see
+[SAP mild-reference SIR](README_sir_mild.md).
+
 For the complete Japanese specification, implementation map, artifacts, and
 verification checklist, see [IMPLEMENTATION_JA.md](IMPLEMENTATION_JA.md).
 

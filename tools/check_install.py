@@ -92,6 +92,8 @@ def main():
     try:
         import chainer
 
+        if not hasattr(chainer, "__version__"):
+            raise ImportError("chainer is not installed")
         print(f"[x] chainer={chainer.__version__}")
         if parse(chainer.__version__) != parse("6.0.0"):
             print(

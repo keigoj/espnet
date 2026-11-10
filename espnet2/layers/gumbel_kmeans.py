@@ -21,6 +21,8 @@ class GumbelKMeansOutput(NamedTuple):
     diversity_loss: torch.Tensor
     codebook_perplexity: torch.Tensor
     temperature: torch.Tensor
+    # Relaxed assignments before straight-through hardening, masked at padding.
+    soft_probabilities: Optional[torch.Tensor] = None
 
 
 class GumbelKMeans(torch.nn.Module):
@@ -248,6 +250,8 @@ class GumbelKMeans(torch.nn.Module):
         inputs: torch.Tensor,
         input_lengths: torch.Tensor,
         sample_gumbel: Optional[bool] = None,
+        update_temperature: bool = True,
+        return_soft_probabilities: bool = False,
     ) -> GumbelKMeansOutput:
         """Quantize a padded batch of SSL features.
 
@@ -257,6 +261,9 @@ class GumbelKMeans(torch.nn.Module):
             sample_gumbel: Override stochastic training behavior.  ``False``
                 uses nearest-centroid assignments, retaining straight-through
                 gradients when training with ``hard=True``.
+            update_temperature: Advance annealing on this training forward.
+                Set to ``False`` for an auxiliary healthy-control SIR forward.
+            return_soft_probabilities: Retain masked relaxed assignments for SIR.
         """
         if inputs.dim() != 3 or inputs.size(-1) != self.input_dim:
             raise ValueError(
@@ -275,13 +282,26 @@ class GumbelKMeans(torch.nn.Module):
         soft_probabilities = F.softmax(logits / temperature_value, dim=-1)
 
         if use_gumbel:
-            probabilities = F.gumbel_softmax(
+            relaxed_probabilities = F.gumbel_softmax(
                 logits,
                 tau=temperature_value,
-                hard=self.hard,
+                hard=False,
                 dim=-1,
             )
+            if self.hard:
+                indices = relaxed_probabilities.argmax(dim=-1)
+                hard_probabilities = torch.zeros_like(relaxed_probabilities).scatter_(
+                    -1, indices.unsqueeze(-1), 1.0
+                )
+                probabilities = (
+                    hard_probabilities
+                    - relaxed_probabilities.detach()
+                    + relaxed_probabilities
+                )
+            else:
+                probabilities = relaxed_probabilities
         elif self.hard:
+            relaxed_probabilities = soft_probabilities
             indices = logits.argmax(dim=-1)
             probabilities = F.one_hot(indices, self.num_clusters).to(logits.dtype)
             if self.training:
@@ -291,6 +311,7 @@ class GumbelKMeans(torch.nn.Module):
                     probabilities - soft_probabilities.detach() + soft_probabilities
                 )
         else:
+            relaxed_probabilities = soft_probabilities
             probabilities = soft_probabilities
 
         valid_probabilities = probabilities * valid_mask.unsqueeze(-1)
@@ -338,6 +359,7 @@ class GumbelKMeans(torch.nn.Module):
         )
         if (
             self.training
+            and update_temperature
             and sample_gumbel is not False
             and self.codebook.requires_grad
         ):
@@ -352,4 +374,9 @@ class GumbelKMeans(torch.nn.Module):
             diversity_loss=diversity_loss,
             codebook_perplexity=codebook_perplexity,
             temperature=temperature,
+            soft_probabilities=(
+                relaxed_probabilities * valid_mask.unsqueeze(-1)
+                if return_soft_probabilities
+                else None
+            ),
         )

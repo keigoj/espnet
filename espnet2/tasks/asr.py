@@ -426,7 +426,9 @@ class ASRTask(AbsTask):
         Tuple[List[str], Dict[str, torch.Tensor]],
     ]:
         # NOTE(kamo): int value = 0 is reserved by CTC-blank symbol
-        return CommonCollateFn(float_pad_value=0.0, int_pad_value=-1)
+        return CommonCollateFn(
+            float_pad_value=0.0, int_pad_value=-1, not_sequence=("sir_pair_mask",)
+        )
 
     @classmethod
     @typechecked
@@ -504,7 +506,7 @@ class ASRTask(AbsTask):
         MAX_REFERENCE_NUM = 4
 
         retval = ["text_spk{}".format(n) for n in range(2, MAX_REFERENCE_NUM + 1)]
-        retval = retval + ["prompt"]
+        retval = retval + ["prompt", "healthy_speech", "sir_pair_mask"]
         retval = tuple(retval)
 
         logging.info(f"Optional Data Names: {retval }")

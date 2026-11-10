@@ -25,7 +25,7 @@ skip_eval=false
 e2e_mode=full
 warmup_epochs=30
 max_epoch=90
-ngpu=1
+ngpu=4
 num_nodes=1
 nj=4
 inference_nj=4
@@ -282,7 +282,7 @@ opts=(
     --valid_set "${valid_set}"
     --test_sets "${test_sets}"
     --bpe_train_text "data/${train_set}/text"
-    # --lm_train_text /dev/null
+    --lm_train_text /dev/null
 )
 if [ -n "${pretrained_model}" ]; then
     opts+=(--pretrained_model "${pretrained_model}")

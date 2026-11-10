@@ -4,7 +4,6 @@ import warnings
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
-import g2p_en
 import jamo
 from packaging.version import parse as V
 from typeguard import typechecked
@@ -255,6 +254,9 @@ class G2p_en:
 
     def __call__(self, text) -> List[str]:
         if self.g2p is None:
+            # Importing g2p_en checks/downloads NLTK data, so defer until needed.
+            import g2p_en
+
             self.g2p = g2p_en.G2p()
 
         phones = self.g2p(text)

@@ -5,6 +5,41 @@ import torch
 from espnet2.layers.gumbel_kmeans import GumbelKMeans
 
 
+@pytest.mark.parametrize("sample_gumbel", [True, False])
+def test_gumbel_kmeans_exposes_relaxed_assignments_without_advancing_temperature(
+    sample_gumbel,
+):
+    quantizer = GumbelKMeans(input_dim=2, num_clusters=3, temperature_decay=0.9)
+    inputs = torch.randn(2, 5, 2, requires_grad=True)
+    lengths = torch.tensor([5, 3])
+    logits = -quantizer._distances(inputs)
+    torch.manual_seed(7)
+    if sample_gumbel:
+        expected_soft = torch.nn.functional.gumbel_softmax(logits, tau=2.0, hard=False)
+    else:
+        expected_soft = (logits / 2.0).softmax(dim=-1)
+    expected_hard = torch.nn.functional.one_hot(expected_soft.argmax(-1), 3).float()
+    expected_soft[1, 3:] = 0.0
+    expected_hard[1, 3:] = 0.0
+
+    torch.manual_seed(7)
+    output = quantizer(
+        inputs,
+        lengths,
+        sample_gumbel=sample_gumbel,
+        update_temperature=False,
+        return_soft_probabilities=True,
+    )
+    torch.testing.assert_close(output.soft_probabilities, expected_soft)
+    torch.testing.assert_close(output.probabilities, expected_hard)
+    assert output.soft_probabilities.shape == (2, 5, 3)
+    assert quantizer.num_updates.item() == 0
+    output.soft_probabilities[..., 0].sum().backward()
+    assert torch.isfinite(inputs.grad).all()
+    assert inputs.grad.abs().sum() > 0
+    assert inputs.grad[1, 3:].eq(0).all()
+
+
 def test_gumbel_kmeans_straight_through_backward():
     quantizer = GumbelKMeans(
         input_dim=4,

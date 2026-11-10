@@ -178,6 +178,146 @@ For an ESPnet-trained SSL checkpoint, `frontend: espnet_ssl` can be used.  Set
 `mask_feats: false` unless masking SSL features during supervised ASR training
 is intentional.
 
+### Severity-invariant regularization (SIR)
+
+The joint ASR model supports SIR from Section IV, Eqs. (7)--(8), of
+[Wang et al., *Differentiable and Severity-invariant Discrete Tokens for
+Dysarthric Speech Recognition*](https://arxiv.org/pdf/2609.16855).
+For each utterance selected for SIR, supply a reference utterance with **the same
+linguistic content**. Severity labels and frame alignment are unnecessary;
+the two utterances may have different durations. The paper uses healthy
+references. The same API also accepts mild dysarthric references as an
+experimental extension for SAP, distinct from the paper's healthy-reference
+setting. Reference selection is the caller's responsibility; the model does
+not determine which speakers are mild.
+
+SIR averages the relaxed Gumbel-Softmax assignments from Eq. (2) over valid
+frames separately for each utterance, then computes
+
+```text
+L_SIR = mean_{b: sir_pair_mask[b] = 1} KL(stop_gradient(p_reference[b]) || p_input[b])
+loss = asr_weight * L_ASR + L_cluster + sir_weight * L_SIR
+```
+
+ASR and configured clustering losses use the entire batch. SIR is averaged
+over the selected pairs, not over all batch utterances. An all-zero mask
+sets SIR to zero and skips reference encoding. In that case, the primary
+speech still trains the SSL frontend, codebook, and ASR through their usual
+objectives. Omitting `sir_pair_mask` selects all utterances, preserving the
+fully paired healthy-reference API for UASpeech and TORGO.
+
+The relaxed assignments use the same Gumbel samples as the main quantization
+path, before straight-through hardening. Padding is excluded. For numerical
+stability, averaged distributions are floored at `quantizer_conf.eps` and
+renormalized before KL computation. In deterministic mode, the distributions
+use distance softmax without Gumbel noise.
+
+The reference target is computed by the same SSL frontend and codebook, under
+`no_grad`, without the downstream ASR encoder or SpecAugment. Both branches
+use the same temperature; the reference forward does not advance annealing.
+SIR updates the trainable SSL frontend and codebook through the input
+branch. The ASR objective continues to train the full pipeline.
+
+Add `sir_weight` to the existing `model_conf` to enable SIR:
+
+```yaml
+model: gumbel_kmeans
+model_conf:
+  sir_weight: 0.1  # Example only; tune for your data, not a paper default.
+  # Keep the remaining model and quantizer configuration unchanged.
+```
+
+The default is `sir_weight: 0.0`; existing configurations and checkpoint
+parameters are unchanged. The existing ASR, clustering, and OT weights remain
+independent. The paper's Eq. (7) uses ASR + SIR during E2E training, whereas
+this implementation also retains whichever clustering terms are configured.
+The paper uses HuBERT and temperature 0.8 (Section V-B); enabling SIR does
+not change this repository's frontend, temperature schedule, or other
+experimental settings.
+
+Create a `healthy.scp` with the **primary utterance IDs** as keys and
+content-parallel reference waveform paths as values. The name `healthy_speech`
+is retained for compatibility and also accepts mild dysarthric references.
+Include every training utterance, using the actual IDs after speed
+perturbation/filtering:
+
+```text
+dysarthric_utt_0001 /path/to/healthy_same_content_0001.wav
+dysarthric_utt_0002 /path/to/healthy_same_content_0002.wav
+dysarthric_utt_0003 /path/to/any_valid_placeholder.wav
+```
+
+For partially paired data, also create a `sir_pair_mask` file containing
+exactly one integer per utterance:
+
+```text
+dysarthric_utt_0001 1
+dysarthric_utt_0002 1
+dysarthric_utt_0003 0
+```
+
+ESPnet requires all streams to contain the primary utterance IDs. An unpaired
+row therefore still needs a valid path in `healthy.scp` so it can be loaded,
+but the placeholder's samples never enter the SSL frontend or SIR computation.
+For SAP, select mild references from training speakers with matching actual
+transcripts; a shared question/prompt ID alone does not guarantee matching
+spoken content. Leave unpaired and reference-only utterances in ASR training
+with mask 0. The reference branch's stop-gradient does not prevent a mild
+utterance from learning through ASR when it appears as a primary input.
+Use training data only when selecting training references; the model does not
+perform metadata-based severity selection or automatic pairing.
+
+Use mono audio with the same sampling rate as the primary speech. The SCP
+selects the reference for each input; pairing and control-speaker sampling
+are the caller's responsibility. The paper randomly selects a control speaker
+for matching content. A fixed SCP keeps that selection fixed unless it is
+regenerated; it does not implement per-epoch random reference sampling.
+Unrelated healthy speech or reference centroids alone cannot supply Eq. (8).
+
+Pass the extra stream to the existing `espnet2.bin.asr_train` command:
+
+```bash
+--train_data_path_and_name_and_type /path/to/train/healthy.scp,healthy_speech,sound
+--train_data_path_and_name_and_type /path/to/train/sir_pair_mask,sir_pair_mask,text_int
+```
+
+Omit the mask stream when all utterances have reference pairs.
+
+For `egs2/sap/asr3/run_e2e.sh`, it can be appended via `--asr_args`:
+
+```bash
+sir_args="--model_conf sir_weight=0.1"
+sir_args+=" --train_data_path_and_name_and_type /path/to/train/healthy.scp,healthy_speech,sound"
+sir_args+=" --train_data_path_and_name_and_type /path/to/train/sir_pair_mask,sir_pair_mask,text_int"
+./run_e2e.sh --e2e_mode full --asr_args "${sir_args}"
+```
+
+ESPnet's collator creates `healthy_speech_lengths` automatically. The Python
+model API accepts `healthy_speech` and `healthy_speech_lengths`, paired by
+batch position, and a binary `sir_pair_mask` of shape `(batch,)` or `(batch, 1)`.
+The mask is non-sequential metadata; its collator does not create a lengths
+tensor. Selected references must have positive lengths; unselected lengths
+may be zero. An all-zero mask permits omitting both reference tensors in the
+Python API. Training with positive `sir_weight` fails explicitly if selected
+pairs are missing or batch dimensions/selected lengths are invalid. Validation
+may omit pairs, in which case `loss_sir` is zero and `loss` excludes SIR. To report
+SIR on validation data, also supply a corresponding
+`--valid_data_path_and_name_and_type ...,healthy_speech,sound` stream and,
+for partial pairing, a `...,sir_pair_mask,text_int` stream.
+Inference and `encode_units` need only the primary speech. The unweighted SIR
+loss is logged as `loss_sir`; `loss` includes its configured coefficient.
+During DDP training, SIR is normalized using the total pair count across workers,
+accounting for ESPnet's primary-batch loss weighting, including workers with no
+local pairs. `sir_num_pairs` reports the total contributing pair count.
+Evaluation uses the local pair mean and local pair count without model-side
+collectives, since attention plotting runs on rank zero alone. Distributed
+validation aggregates these statistics using ESPnet's primary-batch weights.
+ESPnet's
+epoch statistics average these per-batch counts rather than sum them.
+
+For SAP doc-based mild-speaker selection, saved pairing artifacts, and a
+training entry point, see [the SAP SIR recipe](../egs2/sap/asr3/README_sir_mild.md).
+
 ## Fixed-unit extraction for ASR2
 
 Hard units can be dumped from either training path:
